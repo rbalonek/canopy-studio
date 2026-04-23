@@ -2,7 +2,9 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AppStateProvider, useAppState } from './shell/AppState';
 import { Sidebar } from './shell/Sidebar';
 import { Topbar } from './shell/Topbar';
+import { DataProviderProvider } from './data/context';
 import { Placeholder } from './views/Placeholder';
+import { Overview } from './views/Overview';
 import { ROUTES } from './routes';
 
 function Shell() {
@@ -21,13 +23,15 @@ function Shell() {
         {!isFull && <Topbar />}
         <main className="shell-main" style={{ flex: 1, overflowY: 'auto' }}>
           <Routes>
-            {ROUTES.map((r) => (
-              <Route
-                key={r.id}
-                path={r.path}
-                element={<Placeholder title={r.label} note={`Route id: ${r.id}`} />}
-              />
-            ))}
+            {ROUTES.map((r) => {
+              const element =
+                r.id === 'overview' ? (
+                  <Overview />
+                ) : (
+                  <Placeholder title={r.label} note={`Route id: ${r.id}`} />
+                );
+              return <Route key={r.id} path={r.path} element={element} />;
+            })}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
@@ -39,7 +43,9 @@ function Shell() {
 export default function App() {
   return (
     <AppStateProvider>
-      <Shell />
+      <DataProviderProvider>
+        <Shell />
+      </DataProviderProvider>
     </AppStateProvider>
   );
 }
