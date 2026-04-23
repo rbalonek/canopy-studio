@@ -4,6 +4,7 @@ import { Icon } from '../../components/Icon';
 import { useQuery } from '../../data/context';
 import type { ClientHeader } from '../../data/types';
 import { useAppState } from '../../shell/AppState';
+import { BrandTab } from './BrandTab';
 import { OverviewTab } from './OverviewTab';
 
 type TabId =
@@ -120,6 +121,8 @@ export function ClientDetail() {
 
       {tab === 'overview' ? (
         <OverviewTab clientId={header.id} />
+      ) : tab === 'brand' ? (
+        <BrandTab clientId={header.id} />
       ) : (
         <div className="card card-pad stack gap-8">
           <span className="h2" style={{ textTransform: 'capitalize' }}>{tab}</span>

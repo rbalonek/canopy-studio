@@ -1,4 +1,5 @@
 import type {
+  BrandProfile,
   Campaign,
   Client,
   ClientCardStats,
@@ -177,6 +178,63 @@ export const CLIENT_KPIS: Record<string, ClientKpis> = {
     conversions: { value: '18',      delta: 2.8,  seed: 2 },
     roas:        { value: '2.8×',    delta: 0.6,  seed: 9 },
     cpl:         { value: '$162',    delta: -1.4, seed: 4 },
+  },
+};
+
+/**
+ * Editable brand profiles by client id. Absent entries mean the client
+ * hasn't completed brand onboarding yet — the Brand tab renders an
+ * empty state in that case. Logo upload goes through object storage
+ * (Supabase Storage later), so logoUrl starts null.
+ */
+export const BRAND_PROFILES: Record<string, BrandProfile> = {
+  acme: {
+    description:
+      'Full-service family dental practice serving 3 neighborhoods. Specializes in Invisalign, same-day crowns, and pediatric dentistry. Founded 2008.',
+    voice: 'Warm, reassuring, professionally confident. Avoid clinical jargon. Use first names.',
+    dos: [
+      'Lead with patient outcomes',
+      'Mention same-day availability',
+      'Photos of real staff, real patients (with consent)',
+    ],
+    donts: [
+      'No before/after without disclaimer',
+      'No pricing in ads',
+      'No stock photos of teeth close-ups',
+    ],
+    logoUrl: null,
+  },
+  seaside: {
+    description:
+      'Boutique yoga studio and wellness space on the waterfront. Classes for all levels, private sessions, teacher training, monthly community retreats.',
+    voice: 'Grounded, inviting, not woo-y. Speak to real people returning to their bodies — not influencers.',
+    dos: [
+      'Name the teacher leading the class',
+      'Show varied body types and ages',
+      'Reference the coastline, the light, the season',
+    ],
+    donts: [
+      'No "perfect pose" shots',
+      'No medical/health claims',
+      'No stock imagery — always real studio photography',
+    ],
+    logoUrl: null,
+  },
+  bloom: {
+    description:
+      'Independent florist and plant shop. Weekly subscriptions, custom events, and same-day delivery within 5 miles. Focused on local and seasonal sourcing.',
+    voice: 'Quietly enthusiastic. Short sentences. Let the flowers do the talking.',
+    dos: [
+      'Name every variety shown',
+      'Cite the grower when known',
+      'Lead with one hero stem per post',
+    ],
+    donts: [
+      'No filters that distort flower colors',
+      'No clichéd "Valentines / Mother’s Day" copy',
+      'Never promise flowers we can’t source locally',
+    ],
+    logoUrl: null,
   },
 };
 

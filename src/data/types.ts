@@ -111,3 +111,16 @@ export type ClientHeader = {
   /** Primary META ad account id, e.g. act_139204882. Null if none connected. */
   adAccountId: string | null;
 };
+
+/**
+ * Editable brand profile shown on the Brand tab. All fields may be empty
+ * when a client hasn't completed brand onboarding yet.
+ */
+export type BrandProfile = {
+  description: string;
+  voice: string;
+  dos: string[];
+  donts: string[];
+  /** Object key / URL for the uploaded logo, or null when not uploaded. */
+  logoUrl: string | null;
+};

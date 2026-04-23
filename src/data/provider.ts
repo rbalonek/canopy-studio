@@ -1,4 +1,5 @@
 import type {
+  BrandProfile,
   Campaign,
   Client,
   ClientCard,
@@ -21,6 +22,7 @@ export interface DataProvider {
   getClient(id: string): Promise<Client | null>;
   getClientHeader(id: string): Promise<ClientHeader | null>;
   getClientKpis(id: string): Promise<ClientKpis | null>;
+  getBrandProfile(id: string): Promise<BrandProfile | null>;
   listClientCards(): Promise<ClientCard[]>;
 
   listClientPerf(): Promise<ClientPerfRow[]>;

@@ -1,4 +1,5 @@
 import {
+  BRAND_PROFILES,
   CAMPAIGNS,
   CLIENTS,
   CLIENT_CARD_STATS,
@@ -32,6 +33,9 @@ export const mockDataProvider: DataProvider = {
   },
   async getClientKpis(id) {
     return CLIENT_KPIS[id] ?? null;
+  },
+  async getBrandProfile(id) {
+    return BRAND_PROFILES[id] ?? null;
   },
   async listClientCards() {
     return CLIENTS.map((c) => ({
