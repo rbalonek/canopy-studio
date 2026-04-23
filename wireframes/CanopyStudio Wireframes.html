@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>CanopyStudio — Wireframes</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body data-ai="on" data-density="comfortable">
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="components.jsx"></script>
+<script type="text/babel" src="midfi.jsx"></script>
+<script type="text/babel" src="data.jsx"></script>
+<script type="text/babel" src="shell.jsx"></script>
+<script type="text/babel" src="views1.jsx"></script>
+<script type="text/babel" src="views2.jsx"></script>
+<script type="text/babel" src="views3.jsx"></script>
+<script type="text/babel" src="views4.jsx"></script>
+<script type="text/babel" src="preview.jsx"></script>
+
+<script type="text/babel" data-presets="react">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "view": "overview",
+  "mode": "agency",
+  "theme": "dark",
+  "collapsed": false,
+  "density": "comfortable",
+  "ai": true,
+  "grid": false
+}/*EDITMODE-END*/;
+
+const LS_KEY = 'canopy.state.v1';
+const loadState = () => {
+  try { return { ...TWEAK_DEFAULTS, ...(JSON.parse(localStorage.getItem(LS_KEY) || '{}')) }; }
+  catch (e) { return { ...TWEAK_DEFAULTS }; }
+};
+
+const App = () => {
+  const [state, setState] = React.useState(loadState);
+  const set = React.useCallback(patch => setState(s => ({ ...s, ...patch })), []);
+
+  React.useEffect(() => {
+    localStorage.setItem(LS_KEY, JSON.stringify(state));
+    document.documentElement.setAttribute('data-theme', state.theme);
+    document.body.setAttribute('data-ai', state.ai ? 'on' : 'off');
+    document.body.setAttribute('data-density', state.density);
+    document.body.setAttribute('data-grid', state.grid ? 'on' : 'off');
+  }, [state]);
+
+  // listen for edit-mode host
+  React.useEffect(() => {
+    const onMsg = (e) => {
+      if (!e.data || typeof e.data !== 'object') return;
+      if (e.data.type === '__activate_edit_mode') set({ _editMode: true });
+      if (e.data.type === '__deactivate_edit_mode') set({ _editMode: false });
+    };
+    window.addEventListener('message', onMsg);
+    window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+    return () => window.removeEventListener('message', onMsg);
+  }, []);
+
+  const view = state.view;
+  const setView = (v) => { set({ view: v }); window.scrollTo(0, 0); };
+
+  const views = {
+    components: <ViewComponents />,
+    overview: <ViewOverview mode={state.mode} />,
+    clients: <ViewClients mode={state.mode} />,
+    'client-detail': <ViewClientDetail mode={state.mode} />,
+    'ad-perf': <ViewAdPerf />,
+    calendar: <ViewCalendar />,
+    'ad-studio': <ViewAdStudio />,
+    brand: <ViewBrand />,
+    approvals: <ViewApprovals />,
+    publish: <ViewPublish />,
+    reports: <ViewReports />,
+    settings: <ViewSettings />,
+    billing: <ViewBilling />,
+    auth: <ViewAuth />,
+    onboard: <ViewOnboard />,
+    golden: <ViewGolden />,
+  };
+
+  const isFull = view === 'auth' || view === 'onboard';
+
+  return (
+    <div className="shell" style={{ '--side': state.collapsed ? '64px' : '240px' }}>
+      <Sidebar view={view} setView={setView} collapsed={state.collapsed} setCollapsed={v=>set({collapsed:v})} mode={state.mode} />
+      <div className="stack" style={{ overflow: 'hidden', minWidth: 0 }}>
+        {!isFull && <Topbar mode={state.mode} setMode={m=>set({mode:m})} theme={state.theme} setTheme={t=>set({theme:t})} />}
+        <main className="shell-main" style={{ flex: 1, overflowY: 'auto' }} data-screen-label={view}>
+          {views[view] || views.overview}
+        </main>
+      </div>
+      <TweaksPanel state={state} set={set} />
+    </div>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
