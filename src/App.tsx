@@ -6,6 +6,7 @@ import { DataProviderProvider } from './data/context';
 import { Placeholder } from './views/Placeholder';
 import { Overview } from './views/Overview';
 import { Clients } from './views/Clients';
+import { ClientDetail } from './views/client-detail/ClientDetail';
 import { ROUTES } from './routes';
 
 function Shell() {
@@ -30,6 +31,8 @@ function Shell() {
                   <Overview />
                 ) : r.id === 'clients' ? (
                   <Clients />
+                ) : r.id === 'client-detail' ? (
+                  <ClientDetail />
                 ) : (
                   <Placeholder title={r.label} note={`Route id: ${r.id}`} />
                 );

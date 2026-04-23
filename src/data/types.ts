@@ -87,3 +87,27 @@ export type ClientCardStats = {
 };
 
 export type ClientCard = Client & ClientCardStats;
+
+export type KpiValue = {
+  value: string;
+  delta: number;
+  /** Seed for deterministic sparkline. */
+  seed: number;
+};
+
+export type ClientKpis = {
+  spend: KpiValue;
+  conversions: KpiValue;
+  roas: KpiValue;
+  cpl: KpiValue;
+};
+
+/** Meta-data shown in the detail header. Ad account id may be absent. */
+export type ClientHeader = {
+  id: string;
+  name: string;
+  industry: Industry;
+  locationCount: number;
+  /** Primary META ad account id, e.g. act_139204882. Null if none connected. */
+  adAccountId: string | null;
+};

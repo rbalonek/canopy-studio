@@ -2,8 +2,10 @@ import {
   CAMPAIGNS,
   CLIENTS,
   CLIENT_CARD_STATS,
+  CLIENT_KPIS,
   CLIENT_PERF,
   COMPETITORS,
+  META_ACCOUNTS,
   POSTS_QUEUE,
   POSTS_WEEK,
   URGENT,
@@ -16,6 +18,20 @@ export const mockDataProvider: DataProvider = {
   },
   async getClient(id) {
     return CLIENTS.find((c) => c.id === id) ?? null;
+  },
+  async getClientHeader(id) {
+    const c = CLIENTS.find((x) => x.id === id);
+    if (!c) return null;
+    return {
+      id: c.id,
+      name: c.name,
+      industry: c.industry,
+      locationCount: c.locations?.length ?? 0,
+      adAccountId: META_ACCOUNTS[c.id] ?? null,
+    };
+  },
+  async getClientKpis(id) {
+    return CLIENT_KPIS[id] ?? null;
   },
   async listClientCards() {
     return CLIENTS.map((c) => ({

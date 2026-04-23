@@ -2,6 +2,8 @@ import type {
   Campaign,
   Client,
   ClientCard,
+  ClientHeader,
+  ClientKpis,
   ClientPerfRow,
   Competitor,
   QueuedPost,
@@ -17,6 +19,8 @@ import type {
 export interface DataProvider {
   listClients(): Promise<Client[]>;
   getClient(id: string): Promise<Client | null>;
+  getClientHeader(id: string): Promise<ClientHeader | null>;
+  getClientKpis(id: string): Promise<ClientKpis | null>;
   listClientCards(): Promise<ClientCard[]>;
 
   listClientPerf(): Promise<ClientPerfRow[]>;

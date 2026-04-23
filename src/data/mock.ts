@@ -2,6 +2,7 @@ import type {
   Campaign,
   Client,
   ClientCardStats,
+  ClientKpis,
   ClientPerfRow,
   Competitor,
   QueuedPost,
@@ -115,6 +116,81 @@ export const CLIENT_CARD_STATS: Record<string, ClientCardStats> = {
   pine:      { mtdSpend: '$4,180',  activeCampaigns: 2, postsPerWeek: 2 },
   lumen:     { mtdSpend: '$7,340',  activeCampaigns: 3, postsPerWeek: 3 },
   summit:    { mtdSpend: '$2,910',  activeCampaigns: 2, postsPerWeek: 2 },
+};
+
+/**
+ * Per-client detail KPIs shown in the Client Detail > Overview tab.
+ * Deltas and seeds are illustrative; in production these will be the
+ * result of metric aggregations per time window.
+ */
+export const CLIENT_KPIS: Record<string, ClientKpis> = {
+  acme: {
+    spend:       { value: '$18,420', delta: 12.4, seed: 3 },
+    conversions: { value: '142',     delta: 8.1,  seed: 5 },
+    roas:        { value: '3.8×',    delta: 4.0,  seed: 2 },
+    cpl:         { value: '$48',     delta: -2.2, seed: 9 },
+  },
+  seaside: {
+    spend:       { value: '$6,210',  delta: -6.1, seed: 7 },
+    conversions: { value: '58',      delta: -3.4, seed: 4 },
+    roas:        { value: '2.4×',    delta: -1.2, seed: 6 },
+    cpl:         { value: '$31',     delta: 2.1,  seed: 8 },
+  },
+  northside: {
+    spend:       { value: '$42,880', delta: 4.2,  seed: 11 },
+    conversions: { value: '68',      delta: 2.4,  seed: 3 },
+    roas:        { value: '5.2×',    delta: 1.8,  seed: 5 },
+    cpl:         { value: '$184',    delta: -0.6, seed: 7 },
+  },
+  bloom: {
+    spend:       { value: '$3,940',  delta: 18.3, seed: 5 },
+    conversions: { value: '112',     delta: 22.4, seed: 2 },
+    roas:        { value: '4.1×',    delta: 6.0,  seed: 4 },
+    cpl:         { value: '$12',     delta: -8.4, seed: 6 },
+  },
+  kettle: {
+    spend:       { value: '$1,210',  delta: -22.0, seed: 2 },
+    conversions: { value: '28',      delta: -18.1, seed: 8 },
+    roas:        { value: '1.9×',    delta: -4.2,  seed: 3 },
+    cpl:         { value: '$22',     delta: 6.1,   seed: 5 },
+  },
+  harbor: {
+    spend:       { value: '$9,620',  delta: 8.7,  seed: 9 },
+    conversions: { value: '41',      delta: 4.2,  seed: 6 },
+    roas:        { value: '6.8×',    delta: 2.1,  seed: 4 },
+    cpl:         { value: '$96',     delta: -1.8, seed: 7 },
+  },
+  pine: {
+    spend:       { value: '$4,180',  delta: -2.4, seed: 4 },
+    conversions: { value: '29',      delta: -1.2, seed: 5 },
+    roas:        { value: '2.1×',    delta: 0.4,  seed: 3 },
+    cpl:         { value: '$62',     delta: 1.1,  seed: 6 },
+  },
+  lumen: {
+    spend:       { value: '$7,340',  delta: 6.0,  seed: 6 },
+    conversions: { value: '71',      delta: 3.8,  seed: 3 },
+    roas:        { value: '3.4×',    delta: 1.4,  seed: 5 },
+    cpl:         { value: '$38',     delta: -2.0, seed: 7 },
+  },
+  summit: {
+    spend:       { value: '$2,910',  delta: 1.2,  seed: 8 },
+    conversions: { value: '18',      delta: 2.8,  seed: 2 },
+    roas:        { value: '2.8×',    delta: 0.6,  seed: 9 },
+    cpl:         { value: '$162',    delta: -1.4, seed: 4 },
+  },
+};
+
+/**
+ * META ad account IDs by client id. Absent for clients that haven't
+ * connected META yet.
+ */
+export const META_ACCOUNTS: Record<string, string> = {
+  acme: 'act_139204882',
+  seaside: 'act_140118723',
+  northside: 'act_137904412',
+  bloom: 'act_141220077',
+  harbor: 'act_138991045',
+  lumen: 'act_142018330',
 };
 
 export const COMPETITORS: Competitor[] = [
