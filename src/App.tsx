@@ -5,6 +5,7 @@ import { Topbar } from './shell/Topbar';
 import { DataProviderProvider } from './data/context';
 import { Placeholder } from './views/Placeholder';
 import { Overview } from './views/Overview';
+import { Clients } from './views/Clients';
 import { ROUTES } from './routes';
 
 function Shell() {
@@ -27,6 +28,8 @@ function Shell() {
               const element =
                 r.id === 'overview' ? (
                   <Overview />
+                ) : r.id === 'clients' ? (
+                  <Clients />
                 ) : (
                   <Placeholder title={r.label} note={`Route id: ${r.id}`} />
                 );

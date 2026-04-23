@@ -79,3 +79,11 @@ export type Competitor = {
   sov: number;
   pillars: string[];
 };
+
+export type ClientCardStats = {
+  mtdSpend: string;
+  activeCampaigns: number;
+  postsPerWeek: number;
+};
+
+export type ClientCard = Client & ClientCardStats;

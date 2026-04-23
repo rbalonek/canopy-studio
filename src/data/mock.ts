@@ -1,6 +1,7 @@
 import type {
   Campaign,
   Client,
+  ClientCardStats,
   ClientPerfRow,
   Competitor,
   QueuedPost,
@@ -97,6 +98,24 @@ export const POSTS_QUEUE: QueuedPost[] = [
   { thumb: 5, client: 'Northside Ford', chan: ['fb', 'ig'], when: 'Apr 21 · 11:00', fmt: 'Post', status: 'Published' },
   { thumb: 6, client: 'Kettle & Crumb', chan: ['ig'], when: 'Apr 21 · 16:30', fmt: 'Reel', status: 'Failed' },
 ];
+
+/**
+ * Per-client aggregated stats shown on the Clients grid cards.
+ * In production these will be computed aggregates (sum of spend MTD,
+ * count of active campaigns, avg posts per week) — keep keyed by
+ * client id so we don't rely on array-index alignment with CLIENTS.
+ */
+export const CLIENT_CARD_STATS: Record<string, ClientCardStats> = {
+  acme:      { mtdSpend: '$18,420', activeCampaigns: 6, postsPerWeek: 4 },
+  seaside:   { mtdSpend: '$6,210',  activeCampaigns: 3, postsPerWeek: 3 },
+  northside: { mtdSpend: '$42,880', activeCampaigns: 9, postsPerWeek: 2 },
+  bloom:     { mtdSpend: '$3,940',  activeCampaigns: 2, postsPerWeek: 5 },
+  kettle:    { mtdSpend: '$1,210',  activeCampaigns: 1, postsPerWeek: 1 },
+  harbor:    { mtdSpend: '$9,620',  activeCampaigns: 4, postsPerWeek: 2 },
+  pine:      { mtdSpend: '$4,180',  activeCampaigns: 2, postsPerWeek: 2 },
+  lumen:     { mtdSpend: '$7,340',  activeCampaigns: 3, postsPerWeek: 3 },
+  summit:    { mtdSpend: '$2,910',  activeCampaigns: 2, postsPerWeek: 2 },
+};
 
 export const COMPETITORS: Competitor[] = [
   { domain: 'brightsmile.co', industry: 'Dental', since: 'Mar 2025', velocity: 3, sov: 42, pillars: ['Family-friendly', 'Same-day crowns', 'Financing'] },
