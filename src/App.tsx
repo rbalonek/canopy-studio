@@ -3,6 +3,7 @@ import { AppStateProvider, useAppState } from './shell/AppState';
 import { Sidebar } from './shell/Sidebar';
 import { Topbar } from './shell/Topbar';
 import { DataProviderProvider } from './data/context';
+import { pickProvider } from './data/pickProvider';
 import { Placeholder } from './views/Placeholder';
 import { Overview } from './views/Overview';
 import { Clients } from './views/Clients';
@@ -85,10 +86,12 @@ function Shell() {
   );
 }
 
+const provider = pickProvider();
+
 export default function App() {
   return (
     <AppStateProvider>
-      <DataProviderProvider>
+      <DataProviderProvider provider={provider}>
         <Shell />
       </DataProviderProvider>
     </AppStateProvider>
