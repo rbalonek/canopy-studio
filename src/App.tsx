@@ -16,6 +16,7 @@ import { Publish } from './views/Publish';
 import { Reports } from './views/Reports';
 import { Settings } from './views/Settings';
 import { Billing } from './views/Billing';
+import { Auth } from './views/Auth';
 import { ROUTES } from './routes';
 
 function Shell() {
@@ -29,7 +30,7 @@ function Shell() {
       className="shell"
       style={{ ['--side' as string]: state.sidebarCollapsed ? '64px' : '240px' }}
     >
-      {!isFull && <Sidebar />}
+      <Sidebar />
       <div className="stack" style={{ overflow: 'hidden', minWidth: 0 }}>
         {!isFull && <Topbar />}
         <main className="shell-main" style={{ flex: 1, overflowY: 'auto' }}>
@@ -60,6 +61,8 @@ function Shell() {
                   <Settings />
                 ) : r.id === 'billing' ? (
                   <Billing />
+                ) : r.id === 'auth' ? (
+                  <Auth />
                 ) : (
                   <Placeholder title={r.label} note={`Route id: ${r.id}`} />
                 );
