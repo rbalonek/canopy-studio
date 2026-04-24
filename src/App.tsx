@@ -15,6 +15,7 @@ import { Approvals } from './views/Approvals';
 import { Publish } from './views/Publish';
 import { Reports } from './views/Reports';
 import { Settings } from './views/Settings';
+import { Billing } from './views/Billing';
 import { ROUTES } from './routes';
 
 function Shell() {
@@ -57,6 +58,8 @@ function Shell() {
                   <Reports />
                 ) : r.id === 'settings' ? (
                   <Settings />
+                ) : r.id === 'billing' ? (
+                  <Billing />
                 ) : (
                   <Placeholder title={r.label} note={`Route id: ${r.id}`} />
                 );
