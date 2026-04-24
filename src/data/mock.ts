@@ -23,9 +23,9 @@ export const CLIENTS: Client[] = [
     complete: 86,
     parent: true,
     locations: [
-      { id: 'acme-dt', name: 'Acme Dental — Downtown' },
-      { id: 'acme-mt', name: 'Acme Dental — Midtown' },
-      { id: 'acme-ws', name: 'Acme Dental — Westside' },
+      { id: 'acme-dt', name: 'Acme Dental — Downtown', address: '284 Ember Row',  mtdSpend: '$8,210', activeCampaigns: 6, postsPerWeek: 3, complete: 92 },
+      { id: 'acme-mt', name: 'Acme Dental — Midtown',  address: '1420 Oak Blvd',  mtdSpend: '$6,420', activeCampaigns: 4, postsPerWeek: 2, complete: 81 },
+      { id: 'acme-ws', name: 'Acme Dental — Westside', address: '55 Cedar Lane',  mtdSpend: '$3,790', activeCampaigns: 3, postsPerWeek: 2, complete: 74 },
     ],
   },
   { id: 'seaside', name: 'Seaside Yoga', industry: 'Fitness / Wellness', complete: 72 },
@@ -36,8 +36,8 @@ export const CLIENTS: Client[] = [
     complete: 54,
     parent: true,
     locations: [
-      { id: 'nsa-ford', name: 'Northside Ford' },
-      { id: 'nsa-kia', name: 'Northside Kia' },
+      { id: 'nsa-ford', name: 'Northside Ford', address: '9014 Route 44', mtdSpend: '$24,120', activeCampaigns: 5, postsPerWeek: 1, complete: 58 },
+      { id: 'nsa-kia',  name: 'Northside Kia',  address: '9016 Route 44', mtdSpend: '$18,760', activeCampaigns: 4, postsPerWeek: 1, complete: 51 },
     ],
   },
   { id: 'bloom', name: 'Bloom & Vine Florist', industry: 'Retail / E-commerce', complete: 91 },

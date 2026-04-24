@@ -11,6 +11,12 @@ export type Industry =
 export type Location = {
   id: string;
   name: string;
+  address: string;
+  mtdSpend: string;
+  activeCampaigns: number;
+  postsPerWeek: number;
+  /** Brand completeness 0-100 */
+  complete: number;
 };
 
 export type Client = {

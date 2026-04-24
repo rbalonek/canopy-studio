@@ -8,6 +8,7 @@ import { AdAccountsTab } from './AdAccountsTab';
 import { AssetsTab } from './AssetsTab';
 import { BrandTab } from './BrandTab';
 import { CompetitorsTab } from './CompetitorsTab';
+import { LocationsTab } from './LocationsTab';
 import { OverviewTab } from './OverviewTab';
 import { ScrapedPagesTab } from './ScrapedPagesTab';
 
@@ -135,6 +136,8 @@ export function ClientDetail() {
         <CompetitorsTab clientId={header.id} />
       ) : tab === 'ad accounts' ? (
         <AdAccountsTab clientId={header.id} />
+      ) : tab === 'locations' ? (
+        <LocationsTab clientId={header.id} parentName={header.name} />
       ) : (
         <div className="card card-pad stack gap-8">
           <span className="h2" style={{ textTransform: 'capitalize' }}>{tab}</span>

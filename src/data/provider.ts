@@ -9,6 +9,7 @@ import type {
   ClientKpis,
   ClientPerfRow,
   Competitor,
+  Location,
   QueuedPost,
   ScrapedDomain,
   ScrapedPage,
@@ -40,4 +41,5 @@ export interface DataProvider {
   listDomainsForClient(clientId: string): Promise<ScrapedDomain[]>;
   listScrapedPagesForClient(clientId: string): Promise<ScrapedPage[]>;
   listAdAccountsForClient(clientId: string): Promise<AdAccount[]>;
+  listLocationsForClient(clientId: string): Promise<Location[]>;
 }

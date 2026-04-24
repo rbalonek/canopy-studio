@@ -80,4 +80,8 @@ export const mockDataProvider: DataProvider = {
   async listAdAccountsForClient(clientId) {
     return AD_ACCOUNTS.filter((a) => a.clientId === clientId);
   },
+  async listLocationsForClient(clientId) {
+    const c = CLIENTS.find((x) => x.id === clientId);
+    return c?.locations ?? [];
+  },
 };
