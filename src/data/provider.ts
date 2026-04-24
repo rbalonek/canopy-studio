@@ -31,4 +31,5 @@ export interface DataProvider {
   listUrgent(): Promise<UrgentIssue[]>;
   listPostsQueue(): Promise<QueuedPost[]>;
   listCompetitors(): Promise<Competitor[]>;
+  listCompetitorsForClient(clientId: string): Promise<Competitor[]>;
 }

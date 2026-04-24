@@ -5,6 +5,7 @@ import { useQuery } from '../../data/context';
 import type { ClientHeader } from '../../data/types';
 import { useAppState } from '../../shell/AppState';
 import { BrandTab } from './BrandTab';
+import { CompetitorsTab } from './CompetitorsTab';
 import { OverviewTab } from './OverviewTab';
 
 type TabId =
@@ -123,6 +124,8 @@ export function ClientDetail() {
         <OverviewTab clientId={header.id} />
       ) : tab === 'brand' ? (
         <BrandTab clientId={header.id} />
+      ) : tab === 'competitors' ? (
+        <CompetitorsTab clientId={header.id} />
       ) : (
         <div className="card card-pad stack gap-8">
           <span className="h2" style={{ textTransform: 'capitalize' }}>{tab}</span>

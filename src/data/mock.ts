@@ -252,7 +252,7 @@ export const META_ACCOUNTS: Record<string, string> = {
 };
 
 export const COMPETITORS: Competitor[] = [
-  { domain: 'brightsmile.co', industry: 'Dental', since: 'Mar 2025', velocity: 3, sov: 42, pillars: ['Family-friendly', 'Same-day crowns', 'Financing'] },
-  { domain: 'smileworks.com', industry: 'Dental', since: 'Mar 2025', velocity: 8, sov: 68, pillars: ['Tech-forward', 'Invisalign', 'Luxury'] },
-  { domain: 'happyteeth.dental', industry: 'Dental', since: 'Feb 2025', velocity: 4, sov: 55, pillars: ['Kids focus', 'Insurance', 'Emergency'] },
+  { clientId: 'acme', domain: 'brightsmile.co',    industry: 'Dental', since: 'Mar 2025', velocity: 3, sov: 42, pillars: ['Family-friendly', 'Same-day crowns', 'Financing'] },
+  { clientId: 'acme', domain: 'smileworks.com',    industry: 'Dental', since: 'Mar 2025', velocity: 8, sov: 68, pillars: ['Tech-forward', 'Invisalign', 'Luxury'] },
+  { clientId: 'acme', domain: 'happyteeth.dental', industry: 'Dental', since: 'Feb 2025', velocity: 4, sov: 55, pillars: ['Kids focus', 'Insurance', 'Emergency'] },
 ];

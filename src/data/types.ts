@@ -72,6 +72,8 @@ export type QueuedPost = {
 };
 
 export type Competitor = {
+  /** Client this competitor is tracked under. */
+  clientId: string;
   domain: string;
   industry: string;
   since: string;
