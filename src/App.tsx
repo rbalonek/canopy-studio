@@ -17,6 +17,7 @@ import { Reports } from './views/Reports';
 import { Settings } from './views/Settings';
 import { Billing } from './views/Billing';
 import { Auth } from './views/Auth';
+import { Onboard } from './views/Onboard';
 import { ROUTES } from './routes';
 
 function Shell() {
@@ -63,6 +64,8 @@ function Shell() {
                   <Billing />
                 ) : r.id === 'auth' ? (
                   <Auth />
+                ) : r.id === 'onboard' ? (
+                  <Onboard />
                 ) : (
                   <Placeholder title={r.label} note={`Route id: ${r.id}`} />
                 );
