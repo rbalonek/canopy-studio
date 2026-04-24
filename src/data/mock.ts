@@ -288,6 +288,15 @@ export const ASSETS: Asset[] = [
 
   { id: 'ast_blm_01',  clientId: 'bloom',   name: 'bloom-vine-mark.svg',          kind: 'Logo',  analysisStatus: 'Analyzed', sizeLabel: '2 KB',    dateLabel: 'Jan 22', analysisSummary: null },
   { id: 'ast_blm_02',  clientId: 'bloom',   name: 'peony-bundle-april.jpg',       kind: 'Photo', analysisStatus: 'Analyzed', sizeLabel: '1.2 MB',  dateLabel: 'Apr 09', analysisSummary: null },
+
+  { id: 'ast_lum_01',  clientId: 'lumen',   name: 'lumen-monogram.svg',           kind: 'Logo',  analysisStatus: 'Analyzed', sizeLabel: '3 KB',    dateLabel: 'Feb 04', analysisSummary: null },
+  { id: 'ast_lum_02',  clientId: 'lumen',   name: 'frame-wall-hero.jpg',          kind: 'Photo', analysisStatus: 'Analyzed', sizeLabel: '2.4 MB',  dateLabel: 'Mar 18', analysisSummary: null },
+
+  { id: 'ast_har_01',  clientId: 'harbor',  name: 'harbor-wordmark.svg',          kind: 'Logo',  analysisStatus: 'Analyzed', sizeLabel: '4 KB',    dateLabel: 'Jan 15', analysisSummary: null },
+  { id: 'ast_har_02',  clientId: 'harbor',  name: 'managing-partners.jpg',        kind: 'Photo', analysisStatus: 'Pending',  sizeLabel: '3.1 MB',  dateLabel: 'Apr 06', analysisSummary: null },
+
+  { id: 'ast_pin_01',  clientId: 'pine',    name: 'pinecrest-primary.svg',        kind: 'Logo',  analysisStatus: 'Pending',  sizeLabel: '5 KB',    dateLabel: 'Apr 15', analysisSummary: null },
+  { id: 'ast_pin_02',  clientId: 'pine',    name: 'pediatric-waiting-room.jpg',   kind: 'Photo', analysisStatus: 'Analyzed', sizeLabel: '1.8 MB',  dateLabel: 'Mar 29', analysisSummary: null },
 ];
 
 /**

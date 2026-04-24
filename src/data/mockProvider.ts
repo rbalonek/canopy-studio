@@ -76,6 +76,9 @@ export const mockDataProvider: DataProvider = {
   async listCompetitorsForClient(clientId) {
     return COMPETITORS.filter((c) => c.clientId === clientId);
   },
+  async listAssets() {
+    return ASSETS;
+  },
   async listAssetsForClient(clientId) {
     return ASSETS.filter((a) => a.clientId === clientId);
   },
