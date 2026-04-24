@@ -19,6 +19,7 @@ import { Billing } from './views/Billing';
 import { Auth } from './views/Auth';
 import { Onboard } from './views/Onboard';
 import { Golden } from './views/Golden';
+import { Components } from './views/Components';
 import { ROUTES } from './routes';
 
 function Shell() {
@@ -69,6 +70,8 @@ function Shell() {
                   <Onboard />
                 ) : r.id === 'golden' ? (
                   <Golden />
+                ) : r.id === 'components' ? (
+                  <Components />
                 ) : (
                   <Placeholder title={r.label} note={`Route id: ${r.id}`} />
                 );
