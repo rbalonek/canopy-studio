@@ -6,6 +6,7 @@ import {
   BRAND_COMPARISONS,
   BRAND_INTEL_STATS,
   BRAND_PROFILES,
+  BRAND_RULES,
   BRAND_TAKEAWAY,
   GAP_ANGLES,
   CAMPAIGNS,
@@ -114,5 +115,8 @@ export const mockDataProvider: DataProvider = {
   },
   async listGapAnglesForClient(clientId) {
     return GAP_ANGLES.filter((g) => g.clientId === clientId);
+  },
+  async listBrandRules() {
+    return BRAND_RULES;
   },
 };

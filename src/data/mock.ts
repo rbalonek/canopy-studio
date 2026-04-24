@@ -14,6 +14,7 @@ import type {
   ClientKpis,
   ClientPerfRow,
   Competitor,
+  BrandRule,
   GapAngle,
   QueuedPost,
   ScrapedDomain,
@@ -571,6 +572,38 @@ export const GAP_ANGLES: GapAngle[] = [
   { id: 'gap_acme_02', clientId: 'acme', title: 'Weekend-only specialty clinic',                   confidence: 71, evidence: '3 of 8 competitors mention Saturday hours, but none position weekends as the core offering.' },
   { id: 'gap_acme_03', clientId: 'acme', title: 'Transparent upfront pricing for common procedures', confidence: 64, evidence: '2 competitors list "starting at" prices; none show full menu. Acme could break category norms here.' },
   { id: 'gap_acme_04', clientId: 'acme', title: 'Bilingual care emphasis',                         confidence: 58, evidence: 'No competitor markets in Spanish despite 34% of local demo. Acme has a bilingual hygienist.' },
+];
+
+/**
+ * Workspace-level brand rules Claude uses to validate generated content
+ * before it hits the approval queue. Four categories: dos / donts /
+ * tone / visual. clientId is null for cross-client rules (all entries
+ * here are cross-client; per-client overrides will live alongside).
+ */
+export const BRAND_RULES: BrandRule[] = [
+  // Do's — across all clients
+  { id: 'rule_do_01',   category: 'dos',    text: 'Lead with patient / customer outcome',         clientId: null },
+  { id: 'rule_do_02',   category: 'dos',    text: 'Use real staff photos when available',         clientId: null },
+  { id: 'rule_do_03',   category: 'dos',    text: 'Include location-specific CTAs',               clientId: null },
+  { id: 'rule_do_04',   category: 'dos',    text: 'Mention insurance / financing where relevant', clientId: null },
+
+  // Don'ts — across all clients
+  { id: 'rule_dont_01', category: 'donts',  text: 'No pricing in paid ads without disclaimer',    clientId: null },
+  { id: 'rule_dont_02', category: 'donts',  text: 'No stock medical imagery',                     clientId: null },
+  { id: 'rule_dont_03', category: 'donts',  text: 'No before/after without consent',              clientId: null },
+  { id: 'rule_dont_04', category: 'donts',  text: 'No comparative superlatives ("best in town")', clientId: null },
+
+  // Tone
+  { id: 'rule_tone_01', category: 'tone',   text: 'Warm over clinical',                           clientId: null },
+  { id: 'rule_tone_02', category: 'tone',   text: 'First names over titles',                      clientId: null },
+  { id: 'rule_tone_03', category: 'tone',   text: 'Active voice',                                 clientId: null },
+  { id: 'rule_tone_04', category: 'tone',   text: 'Reading level: 7th grade or below',            clientId: null },
+
+  // Visual
+  { id: 'rule_vis_01',  category: 'visual', text: 'Primary logo on light bg; monochrome mark on dark', clientId: null },
+  { id: 'rule_vis_02',  category: 'visual', text: 'Accent colors limited to brand palette',           clientId: null },
+  { id: 'rule_vis_03',  category: 'visual', text: 'Min logo clearspace: 1x height',                  clientId: null },
+  { id: 'rule_vis_04',  category: 'visual', text: 'No drop shadows on logos',                         clientId: null },
 ];
 
 export const COMPETITORS: Competitor[] = [

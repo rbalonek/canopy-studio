@@ -314,6 +314,20 @@ export type GapAngle = {
   evidence: string;
 };
 
+export type BrandRuleCategory = 'dos' | 'donts' | 'tone' | 'visual';
+
+/**
+ * A single brand rule Claude uses to validate generated content. Rules
+ * can be workspace-wide or scoped to a specific client — when clientId
+ * is null the rule applies across all clients.
+ */
+export type BrandRule = {
+  id: string;
+  category: BrandRuleCategory;
+  text: string;
+  clientId: string | null;
+};
+
 export type ClientCardStats = {
   mtdSpend: string;
   activeCampaigns: number;
