@@ -14,6 +14,7 @@ import { Calendar } from './views/Calendar';
 import { Approvals } from './views/Approvals';
 import { Publish } from './views/Publish';
 import { Reports } from './views/Reports';
+import { Settings } from './views/Settings';
 import { ROUTES } from './routes';
 
 function Shell() {
@@ -54,6 +55,8 @@ function Shell() {
                   <Publish />
                 ) : r.id === 'reports' ? (
                   <Reports />
+                ) : r.id === 'settings' ? (
+                  <Settings />
                 ) : (
                   <Placeholder title={r.label} note={`Route id: ${r.id}`} />
                 );
