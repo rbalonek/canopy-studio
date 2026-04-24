@@ -3,7 +3,9 @@ import type {
   AdBrief,
   AdPerfTreeNode,
   Asset,
+  BrandIntelligenceStats,
   BrandProfile,
+  BrandTakeaway,
   Campaign,
   CampaignDetail,
   Client,
@@ -48,4 +50,6 @@ export interface DataProvider {
   listAdPerfTree(): Promise<AdPerfTreeNode[]>;
   getCampaignDetail(campaignId: string): Promise<CampaignDetail | null>;
   getAdBrief(clientId: string): Promise<AdBrief | null>;
+  getBrandIntelligenceStats(): Promise<BrandIntelligenceStats>;
+  getBrandTakeaway(): Promise<BrandTakeaway>;
 }

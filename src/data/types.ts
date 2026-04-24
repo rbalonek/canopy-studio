@@ -254,6 +254,23 @@ export type Competitor = {
   velocity: number;
   sov: number;
   pillars: string[];
+  /** Days ago a new landing page was detected on this competitor. Null when nothing new. */
+  newPageDaysAgo: number | null;
+};
+
+/**
+ * Workspace-level Brand Intelligence stats shown on the hero cards.
+ * These aggregate across all clients in the current workspace.
+ */
+export type BrandIntelligenceStats = {
+  domains: { count: number; pagesIndexed: number };
+  competitors: { tracked: number; newPagesThisWeek: number };
+  rules: { total: number; crossClient: number };
+  assets: { total: number; aiAnalyzed: number };
+};
+
+export type BrandTakeaway = {
+  body: string;
 };
 
 export type ClientCardStats = {

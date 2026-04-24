@@ -3,7 +3,9 @@ import type {
   AdBrief,
   AdPerfTreeNode,
   Asset,
+  BrandIntelligenceStats,
   BrandProfile,
+  BrandTakeaway,
   Campaign,
   CampaignDetail,
   Client,
@@ -466,8 +468,35 @@ export const AD_BRIEFS: Record<string, AdBrief> = {
   },
 };
 
+/**
+ * Workspace-level Brand Intelligence stats — aggregates across every
+ * client in the current workspace. In production these are derived
+ * from DB counts; for now they match the wireframe display text.
+ */
+export const BRAND_INTEL_STATS: BrandIntelligenceStats = {
+  domains: { count: 12, pagesIndexed: 284 },
+  competitors: { tracked: 8, newPagesThisWeek: 3 },
+  rules: { total: 47, crossClient: 12 },
+  assets: { total: 184, aiAnalyzed: 32 },
+};
+
+/**
+ * Claude's cross-workspace takeaway shown under the hero stats. In
+ * production this is a generated summary of the latest Brand
+ * Intelligence scan results.
+ */
+export const BRAND_TAKEAWAY: BrandTakeaway = {
+  body:
+    'Across your 8 competitors, 3 themes dominate: "same-day service" (7 of 8), "insurance transparency" (5 of 8), and "family pricing" (4 of 8). Only 1 competitor talks about sustainability — potential positioning gap for Acme Dental.',
+};
+
 export const COMPETITORS: Competitor[] = [
-  { clientId: 'acme', domain: 'brightsmile.co',    industry: 'Dental', since: 'Mar 2025', velocity: 3, sov: 42, pillars: ['Family-friendly', 'Same-day crowns', 'Financing'] },
-  { clientId: 'acme', domain: 'smileworks.com',    industry: 'Dental', since: 'Mar 2025', velocity: 8, sov: 68, pillars: ['Tech-forward', 'Invisalign', 'Luxury'] },
-  { clientId: 'acme', domain: 'happyteeth.dental', industry: 'Dental', since: 'Feb 2025', velocity: 4, sov: 55, pillars: ['Kids focus', 'Insurance', 'Emergency'] },
+  { clientId: 'acme',    domain: 'brightsmile.co',     industry: 'Dental',     since: 'Mar 2025', velocity: 3, sov: 42, pillars: ['Family-friendly', 'Same-day crowns', 'Financing'], newPageDaysAgo: 1 },
+  { clientId: 'acme',    domain: 'smileworks.com',     industry: 'Dental',     since: 'Mar 2025', velocity: 8, sov: 68, pillars: ['Tech-forward', 'Invisalign', 'Luxury'],             newPageDaysAgo: 2 },
+  { clientId: 'acme',    domain: 'happyteeth.dental',  industry: 'Dental',     since: 'Feb 2025', velocity: 4, sov: 55, pillars: ['Kids focus', 'Insurance', 'Emergency'],             newPageDaysAgo: 3 },
+  { clientId: 'acme',    domain: 'rivercrestdds.com',  industry: 'Dental',     since: 'Apr 2025', velocity: 5, sov: 48, pillars: ['Preventive', 'Whitening', 'Eco-materials'],         newPageDaysAgo: 4 },
+  { clientId: 'seaside', domain: 'bayflowyoga.com',    industry: 'Wellness',   since: 'Feb 2025', velocity: 6, sov: 61, pillars: ['Teacher training', 'Retreats', 'Lifestyle'],        newPageDaysAgo: null },
+  { clientId: 'seaside', domain: 'morningtidefit.com', industry: 'Wellness',   since: 'Mar 2025', velocity: 4, sov: 37, pillars: ['Outdoor fitness', 'Community', 'Habit coaching'],   newPageDaysAgo: 5 },
+  { clientId: 'bloom',   domain: 'meadowstemshop.com', industry: 'Retail',     since: 'Mar 2025', velocity: 3, sov: 45, pillars: ['Subscriptions', 'Weddings', 'Local delivery'],      newPageDaysAgo: 6 },
+  { clientId: 'bloom',   domain: 'fernandfig.shop',    industry: 'Retail',     since: 'Apr 2025', velocity: 2, sov: 29, pillars: ['Dried arrangements', 'Sympathy', 'Corporate'],      newPageDaysAgo: null },
 ];

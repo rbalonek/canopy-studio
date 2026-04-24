@@ -3,7 +3,9 @@ import {
   AD_BRIEFS,
   AD_PERF_TREE,
   ASSETS,
+  BRAND_INTEL_STATS,
   BRAND_PROFILES,
+  BRAND_TAKEAWAY,
   CAMPAIGNS,
   CAMPAIGN_DETAILS,
   CLIENTS,
@@ -95,5 +97,11 @@ export const mockDataProvider: DataProvider = {
   },
   async getAdBrief(clientId) {
     return AD_BRIEFS[clientId] ?? null;
+  },
+  async getBrandIntelligenceStats() {
+    return BRAND_INTEL_STATS;
+  },
+  async getBrandTakeaway() {
+    return BRAND_TAKEAWAY;
   },
 };

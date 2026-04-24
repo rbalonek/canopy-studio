@@ -9,6 +9,7 @@ import { Clients } from './views/Clients';
 import { ClientDetail } from './views/client-detail/ClientDetail';
 import { AdPerf } from './views/AdPerf';
 import { AdStudio } from './views/AdStudio';
+import { BrandIntelligence } from './views/brand/BrandIntelligence';
 import { ROUTES } from './routes';
 
 function Shell() {
@@ -39,6 +40,8 @@ function Shell() {
                   <AdPerf />
                 ) : r.id === 'ad-studio' ? (
                   <AdStudio />
+                ) : r.id === 'brand' ? (
+                  <BrandIntelligence />
                 ) : (
                   <Placeholder title={r.label} note={`Route id: ${r.id}`} />
                 );
