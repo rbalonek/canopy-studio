@@ -201,7 +201,8 @@ export type AdAccount = {
   excludedReason: string | null;
 };
 
-export type DomainHealth = 'Healthy' | 'Warnings' | 'Down';
+export type DomainHealth = 'Healthy' | 'Warnings' | 'Stale' | 'Error';
+export type SitemapStatus = 'Discovered' | 'Partial' | 'Failed';
 export type ScrapeAnalysisStatus = 'Done' | 'Stale' | 'Failed' | 'Pending';
 
 export type ScrapedDomain = {
@@ -210,8 +211,9 @@ export type ScrapedDomain = {
   /** Bare domain, e.g. "acmedental.com". */
   domain: string;
   health: DomainHealth;
+  sitemapStatus: SitemapStatus;
   pageCount: number;
-  /** Human-readable last-scraped ago, e.g. "2d ago". */
+  /** Human-readable last-scraped ago, e.g. "2d ago". "—" when never scraped. */
   lastScrapedLabel: string;
 };
 

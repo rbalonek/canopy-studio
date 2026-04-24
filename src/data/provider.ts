@@ -45,6 +45,7 @@ export interface DataProvider {
   listCompetitors(): Promise<Competitor[]>;
   listCompetitorsForClient(clientId: string): Promise<Competitor[]>;
   listAssetsForClient(clientId: string): Promise<Asset[]>;
+  listDomains(): Promise<ScrapedDomain[]>;
   listDomainsForClient(clientId: string): Promise<ScrapedDomain[]>;
   listScrapedPagesForClient(clientId: string): Promise<ScrapedPage[]>;
   listAdAccountsForClient(clientId: string): Promise<AdAccount[]>;

@@ -11,7 +11,8 @@ import type {
 const HEALTH_PILL: Record<DomainHealth, string> = {
   Healthy: 'green',
   Warnings: 'amber',
-  Down: 'red',
+  Stale: 'amber',
+  Error: 'red',
 };
 
 const ANALYSIS_PILL: Record<ScrapeAnalysisStatus, string> = {

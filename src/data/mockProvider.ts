@@ -78,6 +78,9 @@ export const mockDataProvider: DataProvider = {
   async listAssetsForClient(clientId) {
     return ASSETS.filter((a) => a.clientId === clientId);
   },
+  async listDomains() {
+    return SCRAPED_DOMAINS;
+  },
   async listDomainsForClient(clientId) {
     return SCRAPED_DOMAINS.filter((d) => d.clientId === clientId);
   },

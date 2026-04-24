@@ -294,9 +294,11 @@ export const ASSETS: Asset[] = [
  * counts are denormalized from SCRAPED_PAGES for card-display speed.
  */
 export const SCRAPED_DOMAINS: ScrapedDomain[] = [
-  { id: 'dom_acme_01',  clientId: 'acme',    domain: 'acmedental.com',     health: 'Healthy',  pageCount: 24, lastScrapedLabel: '2d ago' },
-  { id: 'dom_sea_01',   clientId: 'seaside', domain: 'seasideyoga.com',    health: 'Healthy',  pageCount: 9,  lastScrapedLabel: '5d ago' },
-  { id: 'dom_blm_01',   clientId: 'bloom',   domain: 'bloomandvine.co',    health: 'Warnings', pageCount: 14, lastScrapedLabel: '12h ago' },
+  { id: 'dom_acme_01',  clientId: 'acme',      domain: 'acmedental.com',        health: 'Healthy',  sitemapStatus: 'Discovered', pageCount: 24,  lastScrapedLabel: '2d ago' },
+  { id: 'dom_sea_01',   clientId: 'seaside',   domain: 'seasideyoga.com',       health: 'Healthy',  sitemapStatus: 'Discovered', pageCount: 12,  lastScrapedLabel: '4d ago' },
+  { id: 'dom_nsa_01',   clientId: 'northside', domain: 'northsideautogroup.com', health: 'Stale',   sitemapStatus: 'Partial',    pageCount: 142, lastScrapedLabel: '9d ago' },
+  { id: 'dom_blm_01',   clientId: 'bloom',     domain: 'bloomandvine.co',       health: 'Healthy',  sitemapStatus: 'Discovered', pageCount: 86,  lastScrapedLabel: '1d ago' },
+  { id: 'dom_ktl_01',   clientId: 'kettle',    domain: 'kettleandcrumb.cafe',   health: 'Error',    sitemapStatus: 'Failed',     pageCount: 8,   lastScrapedLabel: '—' },
 ];
 
 /**
