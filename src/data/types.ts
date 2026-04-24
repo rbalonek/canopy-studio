@@ -328,6 +328,26 @@ export type BrandRule = {
   clientId: string | null;
 };
 
+export type ApprovalKind = 'post' | 'ad' | 'comment';
+
+/**
+ * An item waiting in the Approvals queue. Created by a human name or
+ * AI (aiDrafted = true, createdBy is null). Status is its draft stage —
+ * approval moves it out of the queue.
+ */
+export type ApprovalItem = {
+  id: string;
+  kind: ApprovalKind;
+  channel: string;
+  clientId: string;
+  clientName: string;
+  createdBy: string | null;
+  aiDrafted: boolean;
+  createdLabel: string;
+  scheduledLabel: string;
+  status: PostStatus;
+};
+
 export type ClientCardStats = {
   mtdSpend: string;
   activeCampaigns: number;

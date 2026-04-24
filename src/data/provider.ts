@@ -2,6 +2,7 @@ import type {
   AdAccount,
   AdBrief,
   AdPerfTreeNode,
+  ApprovalItem,
   Asset,
   BrandComparison,
   BrandIntelligenceStats,
@@ -60,4 +61,5 @@ export interface DataProvider {
   getBrandComparison(clientId: string): Promise<BrandComparison | null>;
   listGapAnglesForClient(clientId: string): Promise<GapAngle[]>;
   listBrandRules(): Promise<BrandRule[]>;
+  listApprovals(): Promise<ApprovalItem[]>;
 }

@@ -2,6 +2,7 @@ import type {
   AdAccount,
   AdBrief,
   AdPerfTreeNode,
+  ApprovalItem,
   Asset,
   BrandComparison,
   BrandIntelligenceStats,
@@ -613,6 +614,21 @@ export const BRAND_RULES: BrandRule[] = [
   { id: 'rule_vis_02',  category: 'visual', text: 'Accent colors limited to brand palette',           clientId: null },
   { id: 'rule_vis_03',  category: 'visual', text: 'Min logo clearspace: 1x height',                  clientId: null },
   { id: 'rule_vis_04',  category: 'visual', text: 'No drop shadows on logos',                         clientId: null },
+];
+
+/**
+ * Items sitting in the Approvals queue. 6 rows covering AI-drafted
+ * (no createdBy, aiDrafted: true) and user-drafted; kinds span post /
+ * ad / comment so the tab counts render plausibly. Approving or
+ * rejecting an item will move it out of this list once writes land.
+ */
+export const APPROVALS: ApprovalItem[] = [
+  { id: 'apr_01', kind: 'post',    channel: 'IG Reel',     clientId: 'acme',      clientName: 'Acme Dental',       createdBy: null,        aiDrafted: true,  createdLabel: '2h ago',    scheduledLabel: 'Apr 23, 9:00',  status: 'Draft' },
+  { id: 'apr_02', kind: 'post',    channel: 'FB Post',     clientId: 'seaside',   clientName: 'Seaside Yoga',      createdBy: 'Maya H.',   aiDrafted: false, createdLabel: '5h ago',    scheduledLabel: 'Apr 22, 14:00', status: 'Draft' },
+  { id: 'apr_03', kind: 'post',    channel: 'IG Carousel', clientId: 'bloom',     clientName: 'Bloom & Vine',      createdBy: null,        aiDrafted: true,  createdLabel: 'Yesterday', scheduledLabel: 'Apr 24, 10:00', status: 'Draft' },
+  { id: 'apr_04', kind: 'ad',      channel: 'FB Ad',       clientId: 'northside', clientName: 'Northside Ford',    createdBy: null,        aiDrafted: true,  createdLabel: 'Yesterday', scheduledLabel: '—',             status: 'Draft' },
+  { id: 'apr_05', kind: 'post',    channel: 'IG Post',     clientId: 'lumen',     clientName: 'Lumen Eyecare',     createdBy: 'Jordan R.', aiDrafted: false, createdLabel: '2d ago',    scheduledLabel: 'Apr 25, 16:00', status: 'Draft' },
+  { id: 'apr_06', kind: 'post',    channel: 'FB Post',     clientId: 'harbor',    clientName: 'Harbor Legal',      createdBy: 'Jordan R.', aiDrafted: false, createdLabel: '2d ago',    scheduledLabel: 'Apr 22, 11:00', status: 'Draft' },
 ];
 
 export const COMPETITORS: Competitor[] = [

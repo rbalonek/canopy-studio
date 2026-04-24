@@ -2,6 +2,7 @@ import {
   AD_ACCOUNTS,
   AD_BRIEFS,
   AD_PERF_TREE,
+  APPROVALS,
   ASSETS,
   BRAND_COMPARISONS,
   BRAND_INTEL_STATS,
@@ -121,5 +122,8 @@ export const mockDataProvider: DataProvider = {
   },
   async listBrandRules() {
     return BRAND_RULES;
+  },
+  async listApprovals() {
+    return APPROVALS;
   },
 };
