@@ -10,6 +10,7 @@ import { ClientDetail } from './views/client-detail/ClientDetail';
 import { AdPerf } from './views/AdPerf';
 import { AdStudio } from './views/AdStudio';
 import { BrandIntelligence } from './views/brand/BrandIntelligence';
+import { Calendar } from './views/Calendar';
 import { ROUTES } from './routes';
 
 function Shell() {
@@ -42,6 +43,8 @@ function Shell() {
                   <AdStudio />
                 ) : r.id === 'brand' ? (
                   <BrandIntelligence />
+                ) : r.id === 'calendar' ? (
+                  <Calendar />
                 ) : (
                   <Placeholder title={r.label} note={`Route id: ${r.id}`} />
                 );
