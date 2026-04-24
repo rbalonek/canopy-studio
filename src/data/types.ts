@@ -77,6 +77,39 @@ export type QueuedPost = {
   status: 'Queued' | 'Publishing' | 'Published' | 'Failed';
 };
 
+export type AdIdea = { title: string; body: string };
+
+export type AdDirection = { title: string; body: string; selected?: boolean };
+
+export type AdVariantImage = {
+  kind: 'photo' | 'offer' | 'product' | 'bg';
+  headline: string;
+  /** Seed for deterministic AdThumb rendering. */
+  seed: number;
+};
+
+/**
+ * AI-grounded brief seed for one client's Ad Studio session. Content here
+ * is what Claude would generate from the client's brand profile + top
+ * performers — for now it's static mock content keyed to the client. The
+ * user's selections (tone / prompt edits / imgMode / gen) are view state.
+ */
+export type AdBrief = {
+  clientId: string;
+  /** Subtitle under the page title, e.g. "Lead Gen · FB + IG". */
+  subtitle: string;
+  /** Default text pre-filled into the prompt textarea. */
+  promptDraft: string;
+  ideas: AdIdea[];
+  directions: AdDirection[];
+  /** Four pre-generated headline variants shown in Step 3. */
+  headlines: string[];
+  /** Four pre-generated image variants shown in Step 3. */
+  images: AdVariantImage[];
+  /** Reference-image metadata when pre-attached. */
+  reference: { fileName: string; sizeLabel: string; dims: string; analysis: string } | null;
+};
+
 export type AdKpi = {
   label: string;
   /** Display value — "$4,820", "284K", "1.13%", "Avg", etc. */

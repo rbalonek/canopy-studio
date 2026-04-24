@@ -1,5 +1,6 @@
 import type {
   AdAccount,
+  AdBrief,
   AdPerfTreeNode,
   Asset,
   BrandProfile,
@@ -415,6 +416,53 @@ export const CAMPAIGN_DETAILS: Record<string, CampaignDetail> = {
         actions: [],
       },
     ],
+  },
+};
+
+/**
+ * Ad Studio brief seeds per client. Only acme is populated — the wireframe
+ * Ad Studio was written around Acme Dental's Lead Gen campaign. Other
+ * clients fall through to a "no brief yet" stub so the view still loads.
+ * In production, these fields come from a Claude generation call grounded
+ * in the client's brand profile + top 90-day performers.
+ */
+export const AD_BRIEFS: Record<string, AdBrief> = {
+  acme: {
+    clientId: 'acme',
+    subtitle: 'AI-grounded ad creation for Acme Dental · Lead Gen · FB + IG',
+    promptDraft:
+      'Warm, family-first. Emphasize same-day crowns and Saturday availability. Photos of real staff.',
+    ideas: [
+      { title: 'Family Saturdays',       body: 'Lean into weekend convenience for working parents.' },
+      { title: 'Same-day, same-chair',   body: 'Emphasize same-day crown tech as a time-saver.' },
+      { title: 'First-visit comfort',    body: 'Warm pediatric angle for new patients and nervous adults.' },
+      { title: 'Insurance made easy',    body: 'Lead with "we accept most plans — no surprises".' },
+      { title: 'Meet Dr. Patel',         body: 'Staff-led trust angle, real photos, human voice.' },
+      { title: 'Neighborhood office',    body: 'Local-first — Portland parents, 10 min from anywhere.' },
+    ],
+    directions: [
+      { title: 'Family Saturdays',       body: 'Lean into weekend convenience for working parents.', selected: true },
+      { title: 'Same-day, same-chair',   body: 'Emphasize same-day crown technology as a time-saver.' },
+      { title: 'First-visit comfort',    body: 'Warm pediatric angle for new patients and nervous adults.' },
+    ],
+    headlines: [
+      'Saturday dental care for busy families',
+      'Same-day crowns. No second visit.',
+      'Your weekend dentist, open 9–3 Saturdays',
+      'Book a Saturday slot — insurance welcome',
+    ],
+    images: [
+      { kind: 'photo', headline: 'Saturdays at Acme',   seed: 91 },
+      { kind: 'offer', headline: 'Same-day crowns',     seed: 98 },
+      { kind: 'photo', headline: 'Meet Dr. Patel',      seed: 105 },
+      { kind: 'bg',    headline: 'Book this Saturday',  seed: 112 },
+    ],
+    reference: {
+      fileName: 'staff-saturday.jpg',
+      sizeLabel: '1.8 MB',
+      dims: '2400×2400',
+      analysis: '"3 people in clinic setting, warm lighting"',
+    },
   },
 };
 

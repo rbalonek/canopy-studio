@@ -1,5 +1,6 @@
 import {
   AD_ACCOUNTS,
+  AD_BRIEFS,
   AD_PERF_TREE,
   ASSETS,
   BRAND_PROFILES,
@@ -91,5 +92,8 @@ export const mockDataProvider: DataProvider = {
   },
   async getCampaignDetail(campaignId) {
     return CAMPAIGN_DETAILS[campaignId] ?? null;
+  },
+  async getAdBrief(clientId) {
+    return AD_BRIEFS[clientId] ?? null;
   },
 };
