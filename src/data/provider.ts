@@ -1,4 +1,5 @@
 import type {
+  AdAccount,
   Asset,
   BrandProfile,
   Campaign,
@@ -38,4 +39,5 @@ export interface DataProvider {
   listAssetsForClient(clientId: string): Promise<Asset[]>;
   listDomainsForClient(clientId: string): Promise<ScrapedDomain[]>;
   listScrapedPagesForClient(clientId: string): Promise<ScrapedPage[]>;
+  listAdAccountsForClient(clientId: string): Promise<AdAccount[]>;
 }

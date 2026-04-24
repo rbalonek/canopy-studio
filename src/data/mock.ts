@@ -1,4 +1,5 @@
 import type {
+  AdAccount,
   Asset,
   BrandProfile,
   Campaign,
@@ -313,6 +314,28 @@ export const SCRAPED_PAGES: ScrapedPage[] = [
   { id: 'pg_blm_01',  clientId: 'bloom',   domainId: 'dom_blm_01', path: '/',           title: 'Bloom & Vine — local florist',               words: 380, lastScrapedLabel: '12h ago', analysisStatus: 'Done' },
   { id: 'pg_blm_02',  clientId: 'bloom',   domainId: 'dom_blm_01', path: '/shop',       title: 'Shop flowers + plants',                      words: 210, lastScrapedLabel: '12h ago', analysisStatus: 'Pending' },
   { id: 'pg_blm_03',  clientId: 'bloom',   domainId: 'dom_blm_01', path: '/subscriptions', title: 'Weekly subscriptions',                    words: 260, lastScrapedLabel: '12h ago', analysisStatus: 'Failed' },
+];
+
+/**
+ * Connected META ad accounts per client. Acme has 3 active + 1 hard-
+ * excluded (matching the wireframe) with one in-progress refresh to
+ * exercise the progress banner. Other clients get a single active row
+ * so the tab isn't empty. Excluded metadata lives inline — that's how
+ * the detail card reads back the "why was this excluded" story.
+ */
+export const AD_ACCOUNTS: AdAccount[] = [
+  { id: 'acc_acme_01', clientId: 'acme', name: 'Acme Dental — Downtown',           accountId: 'act_139204882', currency: 'USD', status: 'Active',     activeCampaigns: 6, mtdSpend: '$8,210', lastRefreshLabel: '8m ago',      excludedAt: null, excludedBy: null, excludedReason: null },
+  { id: 'acc_acme_02', clientId: 'acme', name: 'Acme Dental — Midtown',            accountId: 'act_139204883', currency: 'USD', status: 'Active',     activeCampaigns: 4, mtdSpend: '$6,420', lastRefreshLabel: '12m ago',     excludedAt: null, excludedBy: null, excludedReason: null },
+  { id: 'acc_acme_03', clientId: 'acme', name: 'Acme Dental — Westside',           accountId: 'act_139204884', currency: 'USD', status: 'Refreshing', activeCampaigns: 3, mtdSpend: '$3,790', lastRefreshLabel: 'in progress', excludedAt: null, excludedBy: null, excludedReason: null },
+  { id: 'acc_acme_04', clientId: 'acme', name: 'Acme Dental — Legacy (archived)',  accountId: 'act_118220310', currency: 'USD', status: 'Excluded',   activeCampaigns: 0, mtdSpend: '—',      lastRefreshLabel: '—',
+    excludedAt: 'Jan 03', excludedBy: 'jordan@redwood.co', excludedReason: 'archived account with historical test spend that skewed totals' },
+
+  { id: 'acc_sea_01',    clientId: 'seaside',   name: 'Seaside Yoga',              accountId: 'act_140118723', currency: 'USD', status: 'Active',     activeCampaigns: 3, mtdSpend: '$6,210', lastRefreshLabel: '22m ago',     excludedAt: null, excludedBy: null, excludedReason: null },
+  { id: 'acc_nsa_01',    clientId: 'northside', name: 'Northside Ford',            accountId: 'act_137904412', currency: 'USD', status: 'Active',     activeCampaigns: 5, mtdSpend: '$24,120', lastRefreshLabel: '4m ago',     excludedAt: null, excludedBy: null, excludedReason: null },
+  { id: 'acc_nsa_02',    clientId: 'northside', name: 'Northside Kia',             accountId: 'act_137904413', currency: 'USD', status: 'Active',     activeCampaigns: 4, mtdSpend: '$18,760', lastRefreshLabel: '4m ago',     excludedAt: null, excludedBy: null, excludedReason: null },
+  { id: 'acc_blm_01',    clientId: 'bloom',     name: 'Bloom & Vine Florist',      accountId: 'act_141220077', currency: 'USD', status: 'Active',     activeCampaigns: 2, mtdSpend: '$3,940', lastRefreshLabel: '1h ago',      excludedAt: null, excludedBy: null, excludedReason: null },
+  { id: 'acc_har_01',    clientId: 'harbor',    name: 'Harbor Legal Partners',     accountId: 'act_138991045', currency: 'USD', status: 'Active',     activeCampaigns: 4, mtdSpend: '$9,620', lastRefreshLabel: '30m ago',     excludedAt: null, excludedBy: null, excludedReason: null },
+  { id: 'acc_lum_01',    clientId: 'lumen',     name: 'Lumen Eyecare',             accountId: 'act_142018330', currency: 'USD', status: 'Active',     activeCampaigns: 3, mtdSpend: '$7,340', lastRefreshLabel: '15m ago',     excludedAt: null, excludedBy: null, excludedReason: null },
 ];
 
 export const COMPETITORS: Competitor[] = [

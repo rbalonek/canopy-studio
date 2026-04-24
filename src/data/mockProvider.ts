@@ -1,4 +1,5 @@
 import {
+  AD_ACCOUNTS,
   ASSETS,
   BRAND_PROFILES,
   CAMPAIGNS,
@@ -75,5 +76,8 @@ export const mockDataProvider: DataProvider = {
   },
   async listScrapedPagesForClient(clientId) {
     return SCRAPED_PAGES.filter((p) => p.clientId === clientId);
+  },
+  async listAdAccountsForClient(clientId) {
+    return AD_ACCOUNTS.filter((a) => a.clientId === clientId);
   },
 };

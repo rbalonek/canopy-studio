@@ -4,6 +4,7 @@ import { Icon } from '../../components/Icon';
 import { useQuery } from '../../data/context';
 import type { ClientHeader } from '../../data/types';
 import { useAppState } from '../../shell/AppState';
+import { AdAccountsTab } from './AdAccountsTab';
 import { AssetsTab } from './AssetsTab';
 import { BrandTab } from './BrandTab';
 import { CompetitorsTab } from './CompetitorsTab';
@@ -132,6 +133,8 @@ export function ClientDetail() {
         <ScrapedPagesTab clientId={header.id} />
       ) : tab === 'competitors' ? (
         <CompetitorsTab clientId={header.id} />
+      ) : tab === 'ad accounts' ? (
+        <AdAccountsTab clientId={header.id} />
       ) : (
         <div className="card card-pad stack gap-8">
           <span className="h2" style={{ textTransform: 'capitalize' }}>{tab}</span>

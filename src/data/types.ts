@@ -71,6 +71,28 @@ export type QueuedPost = {
   status: 'Queued' | 'Publishing' | 'Published' | 'Failed';
 };
 
+export type AdAccountStatus = 'Active' | 'Refreshing' | 'Excluded' | 'Disconnected';
+
+export type AdAccount = {
+  id: string;
+  clientId: string;
+  /** Display name, e.g. "Acme Dental — Downtown". */
+  name: string;
+  /** META account id, e.g. "act_139204882". */
+  accountId: string;
+  currency: string;
+  status: AdAccountStatus;
+  activeCampaigns: number;
+  /** Human-readable MTD spend for the account, or "—" when excluded. */
+  mtdSpend: string;
+  /** "8m ago" / "in progress" / "—". */
+  lastRefreshLabel: string;
+  /** Populated only when status === 'Excluded'. */
+  excludedAt: string | null;
+  excludedBy: string | null;
+  excludedReason: string | null;
+};
+
 export type DomainHealth = 'Healthy' | 'Warnings' | 'Down';
 export type ScrapeAnalysisStatus = 'Done' | 'Stale' | 'Failed' | 'Pending';
 
