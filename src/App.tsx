@@ -13,6 +13,7 @@ import { BrandIntelligence } from './views/brand/BrandIntelligence';
 import { Calendar } from './views/Calendar';
 import { Approvals } from './views/Approvals';
 import { Publish } from './views/Publish';
+import { Reports } from './views/Reports';
 import { ROUTES } from './routes';
 
 function Shell() {
@@ -51,6 +52,8 @@ function Shell() {
                   <Approvals />
                 ) : r.id === 'publish' ? (
                   <Publish />
+                ) : r.id === 'reports' ? (
+                  <Reports />
                 ) : (
                   <Placeholder title={r.label} note={`Route id: ${r.id}`} />
                 );
