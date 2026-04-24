@@ -1,4 +1,5 @@
 import type {
+  Asset,
   BrandProfile,
   Campaign,
   Client,
@@ -250,6 +251,33 @@ export const META_ACCOUNTS: Record<string, string> = {
   harbor: 'act_138991045',
   lumen: 'act_142018330',
 };
+
+/**
+ * Uploaded brand assets keyed by client. The 8 acme rows match the
+ * wireframe; a handful of seaside + bloom entries are seeded so those
+ * clients' Assets tab also renders meaningfully. `analysisSummary` is
+ * populated only when analysisStatus === 'Analyzed' *and* we have an
+ * AI writeup — other analyzed assets have the label but no writeup yet.
+ */
+export const ASSETS: Asset[] = [
+  { id: 'ast_acme_01', clientId: 'acme',    name: 'acme-primary-logo.svg',        kind: 'Logo',  analysisStatus: 'Analyzed', sizeLabel: '4 KB',    dateLabel: 'Mar 12', analysisSummary: null },
+  { id: 'ast_acme_02', clientId: 'acme',    name: 'family-saturdays-hero.jpg',    kind: 'Photo', analysisStatus: 'Analyzed', sizeLabel: '1.4 MB',  dateLabel: 'Apr 02',
+    analysisSummary:
+      'Subjects: 2 adults, 2 children, outdoor setting, warm daylight. Detected elements: picnic blanket, laughter. Matches brand voice (warm, family-first). Suggested tags: #family #weekend #lifestyle.' },
+  { id: 'ast_acme_03', clientId: 'acme',    name: 'dr-patel-headshot.jpg',        kind: 'Photo', analysisStatus: 'Analyzed', sizeLabel: '2.1 MB',  dateLabel: 'Feb 28', analysisSummary: null },
+  { id: 'ast_acme_04', clientId: 'acme',    name: 'invisalign-before-after.jpg',  kind: 'Photo', analysisStatus: 'Pending',  sizeLabel: '3.8 MB',  dateLabel: 'Apr 18', analysisSummary: null },
+  { id: 'ast_acme_05', clientId: 'acme',    name: 'reception-360.mp4',            kind: 'Video', analysisStatus: 'Pending',  sizeLabel: '14.2 MB', dateLabel: 'Apr 14', analysisSummary: null },
+  { id: 'ast_acme_06', clientId: 'acme',    name: 'brand-guidelines-2025.pdf',    kind: 'Doc',   analysisStatus: 'Analyzed', sizeLabel: '840 KB',  dateLabel: 'Jan 08', analysisSummary: null },
+  { id: 'ast_acme_07', clientId: 'acme',    name: 'crown-procedure-demo.mp4',     kind: 'Video', analysisStatus: 'Failed',   sizeLabel: '22.1 MB', dateLabel: 'Apr 11', analysisSummary: null },
+  { id: 'ast_acme_08', clientId: 'acme',    name: 'staff-photo-group.jpg',        kind: 'Photo', analysisStatus: 'Analyzed', sizeLabel: '2.8 MB',  dateLabel: 'Mar 22', analysisSummary: null },
+
+  { id: 'ast_sea_01',  clientId: 'seaside', name: 'seaside-wordmark.svg',         kind: 'Logo',  analysisStatus: 'Analyzed', sizeLabel: '3 KB',    dateLabel: 'Feb 10', analysisSummary: null },
+  { id: 'ast_sea_02',  clientId: 'seaside', name: 'morning-class-sunrise.jpg',    kind: 'Photo', analysisStatus: 'Analyzed', sizeLabel: '1.9 MB',  dateLabel: 'Mar 28', analysisSummary: null },
+  { id: 'ast_sea_03',  clientId: 'seaside', name: 'teacher-training-promo.mp4',   kind: 'Video', analysisStatus: 'Pending',  sizeLabel: '31.4 MB', dateLabel: 'Apr 16', analysisSummary: null },
+
+  { id: 'ast_blm_01',  clientId: 'bloom',   name: 'bloom-vine-mark.svg',          kind: 'Logo',  analysisStatus: 'Analyzed', sizeLabel: '2 KB',    dateLabel: 'Jan 22', analysisSummary: null },
+  { id: 'ast_blm_02',  clientId: 'bloom',   name: 'peony-bundle-april.jpg',       kind: 'Photo', analysisStatus: 'Analyzed', sizeLabel: '1.2 MB',  dateLabel: 'Apr 09', analysisSummary: null },
+];
 
 export const COMPETITORS: Competitor[] = [
   { clientId: 'acme', domain: 'brightsmile.co',    industry: 'Dental', since: 'Mar 2025', velocity: 3, sov: 42, pillars: ['Family-friendly', 'Same-day crowns', 'Financing'] },

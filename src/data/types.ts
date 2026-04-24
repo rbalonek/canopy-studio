@@ -71,6 +71,24 @@ export type QueuedPost = {
   status: 'Queued' | 'Publishing' | 'Published' | 'Failed';
 };
 
+export type AssetKind = 'Logo' | 'Photo' | 'Video' | 'Doc';
+export type AssetAnalysisStatus = 'Analyzed' | 'Pending' | 'Failed';
+
+export type Asset = {
+  id: string;
+  clientId: string;
+  /** File name as shown in the grid, e.g. "family-saturdays-hero.jpg". */
+  name: string;
+  kind: AssetKind;
+  analysisStatus: AssetAnalysisStatus;
+  /** Human-readable size, e.g. "1.4 MB". */
+  sizeLabel: string;
+  /** Human-readable upload date, e.g. "Mar 12". */
+  dateLabel: string;
+  /** AI analysis summary — only present when analysisStatus === 'Analyzed'. */
+  analysisSummary: string | null;
+};
+
 export type Competitor = {
   /** Client this competitor is tracked under. */
   clientId: string;

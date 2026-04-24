@@ -1,4 +1,5 @@
 import {
+  ASSETS,
   BRAND_PROFILES,
   CAMPAIGNS,
   CLIENTS,
@@ -63,5 +64,8 @@ export const mockDataProvider: DataProvider = {
   },
   async listCompetitorsForClient(clientId) {
     return COMPETITORS.filter((c) => c.clientId === clientId);
+  },
+  async listAssetsForClient(clientId) {
+    return ASSETS.filter((a) => a.clientId === clientId);
   },
 };

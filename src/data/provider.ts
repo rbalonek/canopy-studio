@@ -1,4 +1,5 @@
 import type {
+  Asset,
   BrandProfile,
   Campaign,
   Client,
@@ -32,4 +33,5 @@ export interface DataProvider {
   listPostsQueue(): Promise<QueuedPost[]>;
   listCompetitors(): Promise<Competitor[]>;
   listCompetitorsForClient(clientId: string): Promise<Competitor[]>;
+  listAssetsForClient(clientId: string): Promise<Asset[]>;
 }

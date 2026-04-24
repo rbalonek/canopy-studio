@@ -4,6 +4,7 @@ import { Icon } from '../../components/Icon';
 import { useQuery } from '../../data/context';
 import type { ClientHeader } from '../../data/types';
 import { useAppState } from '../../shell/AppState';
+import { AssetsTab } from './AssetsTab';
 import { BrandTab } from './BrandTab';
 import { CompetitorsTab } from './CompetitorsTab';
 import { OverviewTab } from './OverviewTab';
@@ -124,6 +125,8 @@ export function ClientDetail() {
         <OverviewTab clientId={header.id} />
       ) : tab === 'brand' ? (
         <BrandTab clientId={header.id} />
+      ) : tab === 'assets' ? (
+        <AssetsTab clientId={header.id} />
       ) : tab === 'competitors' ? (
         <CompetitorsTab clientId={header.id} />
       ) : (
