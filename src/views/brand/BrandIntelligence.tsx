@@ -5,6 +5,7 @@ import { useQuery } from '../../data/context';
 import type { BrandIntelligenceStats, BrandTakeaway } from '../../data/types';
 import { CompareTab } from './CompareTab';
 import { BrandCompetitorsTab } from './CompetitorsTab';
+import { GapsAnglesTab } from './GapsAnglesTab';
 
 type TabId = 'competitors' | 'compare' | 'gaps & angles' | 'websites' | 'rules' | 'assets';
 
@@ -77,6 +78,8 @@ export function BrandIntelligence() {
         <BrandCompetitorsTab />
       ) : tab === 'compare' ? (
         <CompareTab />
+      ) : tab === 'gaps & angles' ? (
+        <GapsAnglesTab />
       ) : (
         <div className="card card-pad stack gap-8">
           <span className="h2" style={{ textTransform: 'capitalize' }}>{tab}</span>

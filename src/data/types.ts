@@ -298,6 +298,20 @@ export type BrandComparison = {
   rows: ComparisonRow[];
 };
 
+/**
+ * A positioning gap or angle surfaced by Claude's analysis of
+ * competitor content. Rendered on the Gaps & Angles tab with a
+ * confidence pill and a "Draft ad from this angle →" CTA.
+ */
+export type GapAngle = {
+  id: string;
+  clientId: string;
+  title: string;
+  /** Confidence 0-100. */
+  confidence: number;
+  evidence: string;
+};
+
 export type ClientCardStats = {
   mtdSpend: string;
   activeCampaigns: number;

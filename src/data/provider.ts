@@ -15,6 +15,7 @@ import type {
   ClientKpis,
   ClientPerfRow,
   Competitor,
+  GapAngle,
   Location,
   QueuedPost,
   ScrapedDomain,
@@ -54,4 +55,5 @@ export interface DataProvider {
   getBrandIntelligenceStats(): Promise<BrandIntelligenceStats>;
   getBrandTakeaway(): Promise<BrandTakeaway>;
   getBrandComparison(clientId: string): Promise<BrandComparison | null>;
+  listGapAnglesForClient(clientId: string): Promise<GapAngle[]>;
 }

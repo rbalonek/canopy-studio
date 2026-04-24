@@ -14,6 +14,7 @@ import type {
   ClientKpis,
   ClientPerfRow,
   Competitor,
+  GapAngle,
   QueuedPost,
   ScrapedDomain,
   ScrapedPage,
@@ -556,6 +557,19 @@ export const BRAND_COMPARISONS: Record<string, BrandComparison> = {
     ],
   },
 };
+
+/**
+ * Positioning-gap opportunities per client. Each row is a theme where
+ * the client could differentiate because competitors are under-indexing
+ * on it. Confidence is Claude's score on how strongly the gap holds up
+ * given the scraped evidence.
+ */
+export const GAP_ANGLES: GapAngle[] = [
+  { id: 'gap_acme_01', clientId: 'acme', title: 'Sustainability / eco-friendly practice',          confidence: 82, evidence: 'Only 1 of 8 competitors mentions eco-materials. Acme uses BPA-free composites.' },
+  { id: 'gap_acme_02', clientId: 'acme', title: 'Weekend-only specialty clinic',                   confidence: 71, evidence: '3 of 8 competitors mention Saturday hours, but none position weekends as the core offering.' },
+  { id: 'gap_acme_03', clientId: 'acme', title: 'Transparent upfront pricing for common procedures', confidence: 64, evidence: '2 competitors list "starting at" prices; none show full menu. Acme could break category norms here.' },
+  { id: 'gap_acme_04', clientId: 'acme', title: 'Bilingual care emphasis',                         confidence: 58, evidence: 'No competitor markets in Spanish despite 34% of local demo. Acme has a bilingual hygienist.' },
+];
 
 export const COMPETITORS: Competitor[] = [
   { clientId: 'acme',    domain: 'brightsmile.co',     industry: 'Dental',     since: 'Mar 2025', velocity: 3, sov: 42, pillars: ['Family-friendly', 'Same-day crowns', 'Financing'], newPageDaysAgo: 1 },
