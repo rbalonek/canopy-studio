@@ -3,6 +3,7 @@ import type {
   AdBrief,
   AdPerfTreeNode,
   Asset,
+  BrandComparison,
   BrandIntelligenceStats,
   BrandProfile,
   BrandTakeaway,
@@ -488,6 +489,72 @@ export const BRAND_INTEL_STATS: BrandIntelligenceStats = {
 export const BRAND_TAKEAWAY: BrandTakeaway = {
   body:
     'Across your 8 competitors, 3 themes dominate: "same-day service" (7 of 8), "insurance transparency" (5 of 8), and "family pricing" (4 of 8). Only 1 competitor talks about sustainability — potential positioning gap for Acme Dental.',
+};
+
+/**
+ * Brand comparison tables per client — what the Brand Intelligence
+ * Compare tab renders. Acme compares against its two closest tracked
+ * competitors (brightsmile.co, smileworks.com). Cells carry a
+ * discriminator so the row renderer can branch into swatches / cadence
+ * / text. `gap: true` on a cell flags where the client is behind and
+ * shows the "Draft ad to close gap" affordance.
+ */
+export const BRAND_COMPARISONS: Record<string, BrandComparison> = {
+  acme: {
+    clientId: 'acme',
+    selfName: 'Acme Dental',
+    competitorDomains: ['brightsmile.co', 'smileworks.com'],
+    rows: [
+      {
+        dimension: 'Brand voice',
+        cells: [
+          { type: 'text', value: 'Warm, family-first' },
+          { type: 'text', value: 'Clinical, reassuring' },
+          { type: 'text', value: 'Premium, tech-forward' },
+        ],
+      },
+      {
+        dimension: 'Positioning',
+        cells: [
+          { type: 'text', value: 'Neighborhood dentist' },
+          { type: 'text', value: 'Family value' },
+          { type: 'text', value: 'Luxury concierge', gap: true },
+        ],
+      },
+      {
+        dimension: 'Primary CTA',
+        cells: [
+          { type: 'text', value: 'Book online' },
+          { type: 'text', value: 'Get a free quote' },
+          { type: 'text', value: 'Schedule consultation' },
+        ],
+      },
+      {
+        dimension: 'Visual palette',
+        cells: [
+          { type: 'palette', colors: ['#2a5f8d', '#f4e3b2', '#0e8a80'] },
+          { type: 'palette', colors: ['#b83f3f', '#f9f5ee', '#2b2b2b'] },
+          { type: 'palette', colors: ['#1a1a1a', '#c9a961', '#ffffff'] },
+        ],
+      },
+      {
+        dimension: 'Content cadence',
+        cells: [
+          { type: 'cadence', seed: 4 },
+          { type: 'cadence', seed: 3 },
+          { type: 'cadence', seed: 8, gap: true },
+        ],
+      },
+      {
+        dimension: 'Channel mix',
+        cells: [
+          { type: 'text', value: 'FB 60% · IG 40%' },
+          { type: 'text', value: 'FB 80% · IG 20%' },
+          { type: 'text', value: 'IG 70% · FB 20% · TikTok 10%' },
+        ],
+      },
+    ],
+  },
 };
 
 export const COMPETITORS: Competitor[] = [

@@ -273,6 +273,31 @@ export type BrandTakeaway = {
   body: string;
 };
 
+/**
+ * A cell in a brand comparison table. Cells are heterogeneous — most are
+ * plain text, but the visual-palette row renders swatches and the
+ * content-cadence row renders a 12-week CreativeCadence bar strip.
+ * `gap: true` marks a cell where `self` is behind and a "Draft ad to
+ * close gap" affordance should appear.
+ */
+export type ComparisonCell =
+  | { type: 'text'; value: string; gap?: boolean }
+  | { type: 'palette'; colors: string[] }
+  | { type: 'cadence'; seed: number; gap?: boolean };
+
+export type ComparisonRow = {
+  dimension: string;
+  /** First cell is the client's own value; the rest are competitor values. */
+  cells: ComparisonCell[];
+};
+
+export type BrandComparison = {
+  clientId: string;
+  selfName: string;
+  competitorDomains: string[];
+  rows: ComparisonRow[];
+};
+
 export type ClientCardStats = {
   mtdSpend: string;
   activeCampaigns: number;

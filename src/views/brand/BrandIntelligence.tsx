@@ -3,6 +3,7 @@ import { AIBadge } from '../../components/AIBadge';
 import { Icon } from '../../components/Icon';
 import { useQuery } from '../../data/context';
 import type { BrandIntelligenceStats, BrandTakeaway } from '../../data/types';
+import { CompareTab } from './CompareTab';
 import { BrandCompetitorsTab } from './CompetitorsTab';
 
 type TabId = 'competitors' | 'compare' | 'gaps & angles' | 'websites' | 'rules' | 'assets';
@@ -74,6 +75,8 @@ export function BrandIntelligence() {
 
       {tab === 'competitors' ? (
         <BrandCompetitorsTab />
+      ) : tab === 'compare' ? (
+        <CompareTab />
       ) : (
         <div className="card card-pad stack gap-8">
           <span className="h2" style={{ textTransform: 'capitalize' }}>{tab}</span>

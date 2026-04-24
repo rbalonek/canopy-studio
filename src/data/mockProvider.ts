@@ -3,6 +3,7 @@ import {
   AD_BRIEFS,
   AD_PERF_TREE,
   ASSETS,
+  BRAND_COMPARISONS,
   BRAND_INTEL_STATS,
   BRAND_PROFILES,
   BRAND_TAKEAWAY,
@@ -103,5 +104,8 @@ export const mockDataProvider: DataProvider = {
   },
   async getBrandTakeaway() {
     return BRAND_TAKEAWAY;
+  },
+  async getBrandComparison(clientId) {
+    return BRAND_COMPARISONS[clientId] ?? null;
   },
 };

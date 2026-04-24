@@ -3,6 +3,7 @@ import type {
   AdBrief,
   AdPerfTreeNode,
   Asset,
+  BrandComparison,
   BrandIntelligenceStats,
   BrandProfile,
   BrandTakeaway,
@@ -52,4 +53,5 @@ export interface DataProvider {
   getAdBrief(clientId: string): Promise<AdBrief | null>;
   getBrandIntelligenceStats(): Promise<BrandIntelligenceStats>;
   getBrandTakeaway(): Promise<BrandTakeaway>;
+  getBrandComparison(clientId: string): Promise<BrandComparison | null>;
 }
