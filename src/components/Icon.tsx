@@ -19,6 +19,10 @@ const PATHS: Record<string, string> = {
   link: 'M10 14a5 5 0 0 1 0-7l3-3a5 5 0 0 1 7 7l-2 2M14 10a5 5 0 0 1 0 7l-3 3a5 5 0 0 1-7-7l2-2',
   warn: 'M12 3L2 21h20L12 3zM12 10v5M12 18v.01',
   dots: 'M5 12h.01M12 12h.01M19 12h.01',
+  bolt: 'M13 3L4 14h7l-1 7 9-11h-7l1-7z',
+  chev: 'M9 6l6 6-6 6',
+  chevd: 'M6 9l6 6 6-6',
+  image: 'M3 5h18v14H3zM3 16l5-5 5 5 3-3 5 5M16 9a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
 };
 
 type Props = {

@@ -77,6 +77,75 @@ export type QueuedPost = {
   status: 'Queued' | 'Publishing' | 'Published' | 'Failed';
 };
 
+export type AdKpi = {
+  label: string;
+  /** Display value — "$4,820", "284K", "1.13%", "Avg", etc. */
+  value: string;
+  /** Percent delta vs prior period; 0 when the metric is non-numeric (Quality/Engagement). */
+  delta: number;
+  /** Seed for deterministic sparkline. */
+  seed: number;
+};
+
+export type AdSet = {
+  id: string;
+  campaignId: string;
+  name: string;
+  spend: string;
+  conv: number;
+  /** "$93" or "—" when no conversions. */
+  cpl: string;
+  ctr: string;
+  /** 0-100 CPL bar fill relative to benchmark; 0 hides the bar. */
+  cplPct: number;
+  /** Sparkline seed for the trend column. */
+  sparkSeed: number;
+  trendUp: boolean;
+  status: CampaignStatus;
+};
+
+export type AdInsightPriority = 'High priority' | 'Medium' | 'Low';
+
+export type AdInsight = {
+  priority: AdInsightPriority;
+  /** Border accent: maps to the same pill color. */
+  accent: 'red' | 'amber' | 'green';
+  title: string;
+  body: string;
+  /** Optional action buttons shown under the insight. */
+  actions: { label: string; style: 'ai' | 'default' | 'ghost' }[];
+};
+
+export type CampaignDetail = {
+  id: string;
+  clientId: string;
+  name: string;
+  strategy: Campaign['strategy'];
+  status: CampaignStatus;
+  /** META account id the campaign lives under. */
+  accountId: string;
+  /** Client display name for the header. */
+  clientName: string;
+  lastRefreshLabel: string;
+  kpis: AdKpi[];
+  adSets: AdSet[];
+  insights: AdInsight[];
+};
+
+export type AdPerfTreeNode = {
+  id: string;
+  /** Depth 0–4. 0=root, 1=client, 2=ad account, 3=campaign, 4=ad set. */
+  lvl: number;
+  label: string;
+  /** Displayed on the right, e.g. "$4,820". */
+  spend: string;
+  icon?: string;
+  /** True for ad-account rows so the id renders in monospaced type. */
+  mono?: boolean;
+  /** Campaign id when this node selects a campaign in the detail panel. */
+  campaignId?: string;
+};
+
 export type AdAccountStatus = 'Active' | 'Refreshing' | 'Excluded' | 'Disconnected';
 
 export type AdAccount = {

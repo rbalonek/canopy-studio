@@ -1,8 +1,10 @@
 import type {
   AdAccount,
+  AdPerfTreeNode,
   Asset,
   BrandProfile,
   Campaign,
+  CampaignDetail,
   Client,
   ClientCardStats,
   ClientKpis,
@@ -337,6 +339,84 @@ export const AD_ACCOUNTS: AdAccount[] = [
   { id: 'acc_har_01',    clientId: 'harbor',    name: 'Harbor Legal Partners',     accountId: 'act_138991045', currency: 'USD', status: 'Active',     activeCampaigns: 4, mtdSpend: '$9,620', lastRefreshLabel: '30m ago',     excludedAt: null, excludedBy: null, excludedReason: null },
   { id: 'acc_lum_01',    clientId: 'lumen',     name: 'Lumen Eyecare',             accountId: 'act_142018330', currency: 'USD', status: 'Active',     activeCampaigns: 3, mtdSpend: '$7,340', lastRefreshLabel: '15m ago',     excludedAt: null, excludedBy: null, excludedReason: null },
 ];
+
+/**
+ * Ad Performance hierarchy tree shown in the left rail. Flat array of
+ * nodes with a depth (lvl) — renders hierarchical via indentation. The
+ * currently-selected campaign defaults to cmp_82910 (acme's ASO campaign).
+ * Shape mirrors what a recursive Supabase query would flatten into.
+ */
+export const AD_PERF_TREE: AdPerfTreeNode[] = [
+  { id: 'n_all',                   lvl: 0, label: 'All clients',                               spend: '$94,842', icon: 'home' },
+  { id: 'n_acme',                  lvl: 1, label: 'Acme Dental',                               spend: '$18,420', icon: 'users' },
+  { id: 'n_acme_act_139204882',    lvl: 2, label: 'act_139204882',                             spend: '$18,420', icon: 'chart', mono: true },
+  { id: 'n_cmp_82910',             lvl: 3, label: 'Leads | ASO | Group Events | April 2025',   spend: '$4,820',  icon: 'bolt',  campaignId: 'cmp_82910' },
+  { id: 'n_adset_443021',          lvl: 4, label: 'ASO — Broad',                               spend: '$2,410',  campaignId: 'cmp_82910' },
+  { id: 'n_adset_443022',          lvl: 4, label: 'ASO — Lookalike 1%',                        spend: '$1,680',  campaignId: 'cmp_82910' },
+  { id: 'n_adset_443023',          lvl: 4, label: 'ASO — Retargeting',                         spend: '$730',    campaignId: 'cmp_82910' },
+  { id: 'n_cmp_82911',             lvl: 3, label: 'Add to Cart | Birthdays | 2025',            spend: '$2,104',  campaignId: 'cmp_82911' },
+  { id: 'n_cmp_82912',             lvl: 3, label: 'Purchase | Spring Sale | 2025',             spend: '$8,612',  campaignId: 'cmp_82912' },
+  { id: 'n_seaside',               lvl: 1, label: 'Seaside Yoga',                              spend: '$6,210',  icon: 'users' },
+  { id: 'n_northside',             lvl: 1, label: 'Northside Auto Group',                      spend: '$42,880', icon: 'users' },
+];
+
+/**
+ * Per-campaign detail shown on the right when a campaign is selected.
+ * Only cmp_82910 is fully populated (matches the wireframe); other
+ * campaigns fall through to a "no data yet" state. Deltas of 0 signal
+ * non-numeric metrics (Quality / Engagement) — the view renders a
+ * five-segment bar instead of a sparkline for those.
+ */
+export const CAMPAIGN_DETAILS: Record<string, CampaignDetail> = {
+  cmp_82910: {
+    id: 'cmp_82910',
+    clientId: 'acme',
+    name: 'Leads | ASO | Group Events | April 2025',
+    strategy: 'Lead Gen',
+    status: 'Active',
+    accountId: 'act_139204882',
+    clientName: 'Acme Dental',
+    lastRefreshLabel: '8m ago',
+    kpis: [
+      { label: 'Spend',       value: '$4,820',    delta: 12.4, seed: 1  },
+      { label: 'Impressions', value: '284K',      delta: 6.2,  seed: 2  },
+      { label: 'Reach',       value: '192K',      delta: 4.8,  seed: 3  },
+      { label: 'Clicks',      value: '3,210',     delta: -3.1, seed: 4  },
+      { label: 'CTR',         value: '1.13%',     delta: -8.7, seed: 5  },
+      { label: 'CPC',         value: '$1.50',     delta: 2.1,  seed: 6  },
+      { label: 'CPM',         value: '$16.97',    delta: 5.4,  seed: 7  },
+      { label: 'Conversions', value: '42',        delta: 18.3, seed: 8  },
+      { label: 'Cost/Conv',   value: '$115',      delta: -4.8, seed: 9  },
+      { label: 'ROAS',        value: '4.2×',      delta: 11.2, seed: 10 },
+      { label: 'Quality',     value: 'Avg',       delta: 0,    seed: 11 },
+      { label: 'Engagement',  value: 'Above avg', delta: 0,    seed: 12 },
+    ],
+    adSets: [
+      { id: 'adset_443021', campaignId: 'cmp_82910', name: 'ASO — Broad',          spend: '$2,410', conv: 0,  cpl: '—',   ctr: '0.82%', cplPct: 0,  sparkSeed: 44, trendUp: false, status: 'Active' },
+      { id: 'adset_443022', campaignId: 'cmp_82910', name: 'ASO — Lookalike 1%',   spend: '$1,680', conv: 18, cpl: '$93', ctr: '1.42%', cplPct: 78, sparkSeed: 45, trendUp: true,  status: 'Active' },
+      { id: 'adset_443023', campaignId: 'cmp_82910', name: 'ASO — Retargeting',    spend: '$730',   conv: 24, cpl: '$30', ctr: '2.11%', cplPct: 28, sparkSeed: 46, trendUp: true,  status: 'Active' },
+    ],
+    insights: [
+      {
+        priority: 'High priority',
+        accent: 'red',
+        title: 'ASO — Broad is burning budget with no conversions',
+        body: '$2,410 spent over 6 days. 0 conversions vs. 18 for ASO — Lookalike 1%. Recommend pausing Broad, reallocating to Lookalike.',
+        actions: [
+          { label: 'Pause ad set →', style: 'ai' },
+          { label: 'Create variant in Ad Studio →', style: 'default' },
+        ],
+      },
+      {
+        priority: 'Medium',
+        accent: 'amber',
+        title: 'Creative fatigue likely on 2 of 4 ads',
+        body: 'CTR declined 28% over 14 days. Top performer from March ("Family Saturdays") had 4.1% CTR — generate 3 new variants grounded in that angle.',
+        actions: [],
+      },
+    ],
+  },
+};
 
 export const COMPETITORS: Competitor[] = [
   { clientId: 'acme', domain: 'brightsmile.co',    industry: 'Dental', since: 'Mar 2025', velocity: 3, sov: 42, pillars: ['Family-friendly', 'Same-day crowns', 'Financing'] },

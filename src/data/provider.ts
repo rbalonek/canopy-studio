@@ -1,8 +1,10 @@
 import type {
   AdAccount,
+  AdPerfTreeNode,
   Asset,
   BrandProfile,
   Campaign,
+  CampaignDetail,
   Client,
   ClientCard,
   ClientHeader,
@@ -42,4 +44,6 @@ export interface DataProvider {
   listScrapedPagesForClient(clientId: string): Promise<ScrapedPage[]>;
   listAdAccountsForClient(clientId: string): Promise<AdAccount[]>;
   listLocationsForClient(clientId: string): Promise<Location[]>;
+  listAdPerfTree(): Promise<AdPerfTreeNode[]>;
+  getCampaignDetail(campaignId: string): Promise<CampaignDetail | null>;
 }

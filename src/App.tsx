@@ -7,6 +7,7 @@ import { Placeholder } from './views/Placeholder';
 import { Overview } from './views/Overview';
 import { Clients } from './views/Clients';
 import { ClientDetail } from './views/client-detail/ClientDetail';
+import { AdPerf } from './views/AdPerf';
 import { ROUTES } from './routes';
 
 function Shell() {
@@ -33,6 +34,8 @@ function Shell() {
                   <Clients />
                 ) : r.id === 'client-detail' ? (
                   <ClientDetail />
+                ) : r.id === 'ad-perf' ? (
+                  <AdPerf />
                 ) : (
                   <Placeholder title={r.label} note={`Route id: ${r.id}`} />
                 );

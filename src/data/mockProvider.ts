@@ -1,8 +1,10 @@
 import {
   AD_ACCOUNTS,
+  AD_PERF_TREE,
   ASSETS,
   BRAND_PROFILES,
   CAMPAIGNS,
+  CAMPAIGN_DETAILS,
   CLIENTS,
   CLIENT_CARD_STATS,
   CLIENT_KPIS,
@@ -83,5 +85,11 @@ export const mockDataProvider: DataProvider = {
   async listLocationsForClient(clientId) {
     const c = CLIENTS.find((x) => x.id === clientId);
     return c?.locations ?? [];
+  },
+  async listAdPerfTree() {
+    return AD_PERF_TREE;
+  },
+  async getCampaignDetail(campaignId) {
+    return CAMPAIGN_DETAILS[campaignId] ?? null;
   },
 };
