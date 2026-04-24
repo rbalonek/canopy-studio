@@ -10,6 +10,8 @@ import {
   META_ACCOUNTS,
   POSTS_QUEUE,
   POSTS_WEEK,
+  SCRAPED_DOMAINS,
+  SCRAPED_PAGES,
   URGENT,
 } from './mock';
 import type { DataProvider } from './provider';
@@ -67,5 +69,11 @@ export const mockDataProvider: DataProvider = {
   },
   async listAssetsForClient(clientId) {
     return ASSETS.filter((a) => a.clientId === clientId);
+  },
+  async listDomainsForClient(clientId) {
+    return SCRAPED_DOMAINS.filter((d) => d.clientId === clientId);
+  },
+  async listScrapedPagesForClient(clientId) {
+    return SCRAPED_PAGES.filter((p) => p.clientId === clientId);
   },
 };

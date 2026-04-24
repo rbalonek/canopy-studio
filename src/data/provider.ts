@@ -9,6 +9,8 @@ import type {
   ClientPerfRow,
   Competitor,
   QueuedPost,
+  ScrapedDomain,
+  ScrapedPage,
   UrgentIssue,
   WeekPostsDay,
 } from './types';
@@ -34,4 +36,6 @@ export interface DataProvider {
   listCompetitors(): Promise<Competitor[]>;
   listCompetitorsForClient(clientId: string): Promise<Competitor[]>;
   listAssetsForClient(clientId: string): Promise<Asset[]>;
+  listDomainsForClient(clientId: string): Promise<ScrapedDomain[]>;
+  listScrapedPagesForClient(clientId: string): Promise<ScrapedPage[]>;
 }

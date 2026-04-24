@@ -8,6 +8,7 @@ import { AssetsTab } from './AssetsTab';
 import { BrandTab } from './BrandTab';
 import { CompetitorsTab } from './CompetitorsTab';
 import { OverviewTab } from './OverviewTab';
+import { ScrapedPagesTab } from './ScrapedPagesTab';
 
 type TabId =
   | 'overview'
@@ -127,6 +128,8 @@ export function ClientDetail() {
         <BrandTab clientId={header.id} />
       ) : tab === 'assets' ? (
         <AssetsTab clientId={header.id} />
+      ) : tab === 'scraped pages' ? (
+        <ScrapedPagesTab clientId={header.id} />
       ) : tab === 'competitors' ? (
         <CompetitorsTab clientId={header.id} />
       ) : (

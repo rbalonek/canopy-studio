@@ -71,6 +71,32 @@ export type QueuedPost = {
   status: 'Queued' | 'Publishing' | 'Published' | 'Failed';
 };
 
+export type DomainHealth = 'Healthy' | 'Warnings' | 'Down';
+export type ScrapeAnalysisStatus = 'Done' | 'Stale' | 'Failed' | 'Pending';
+
+export type ScrapedDomain = {
+  id: string;
+  clientId: string;
+  /** Bare domain, e.g. "acmedental.com". */
+  domain: string;
+  health: DomainHealth;
+  pageCount: number;
+  /** Human-readable last-scraped ago, e.g. "2d ago". */
+  lastScrapedLabel: string;
+};
+
+export type ScrapedPage = {
+  id: string;
+  clientId: string;
+  domainId: string;
+  /** URL path, e.g. "/services/invisalign". */
+  path: string;
+  title: string;
+  words: number;
+  lastScrapedLabel: string;
+  analysisStatus: ScrapeAnalysisStatus;
+};
+
 export type AssetKind = 'Logo' | 'Photo' | 'Video' | 'Doc';
 export type AssetAnalysisStatus = 'Analyzed' | 'Pending' | 'Failed';
 

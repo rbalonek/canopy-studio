@@ -16,6 +16,7 @@ const PATHS: Record<string, string> = {
   refresh: 'M20 11A8 8 0 1 0 17 18M20 4v6h-6',
   filter: 'M4 4h16l-6 8v6l-4 2v-8L4 4z',
   upload: 'M12 3v14M7 8l5-5 5 5M4 21h16',
+  link: 'M10 14a5 5 0 0 1 0-7l3-3a5 5 0 0 1 7 7l-2 2M14 10a5 5 0 0 1 0 7l-3 3a5 5 0 0 1-7-7l2-2',
   warn: 'M12 3L2 21h20L12 3zM12 10v5M12 18v.01',
   dots: 'M5 12h.01M12 12h.01M19 12h.01',
 };

@@ -8,6 +8,8 @@ import type {
   ClientPerfRow,
   Competitor,
   QueuedPost,
+  ScrapedDomain,
+  ScrapedPage,
   UrgentIssue,
   WeekPostsDay,
 } from './types';
@@ -277,6 +279,40 @@ export const ASSETS: Asset[] = [
 
   { id: 'ast_blm_01',  clientId: 'bloom',   name: 'bloom-vine-mark.svg',          kind: 'Logo',  analysisStatus: 'Analyzed', sizeLabel: '2 KB',    dateLabel: 'Jan 22', analysisSummary: null },
   { id: 'ast_blm_02',  clientId: 'bloom',   name: 'peony-bundle-april.jpg',       kind: 'Photo', analysisStatus: 'Analyzed', sizeLabel: '1.2 MB',  dateLabel: 'Apr 09', analysisSummary: null },
+];
+
+/**
+ * Scraped domains per client. One row per connected website. Page
+ * counts are denormalized from SCRAPED_PAGES for card-display speed.
+ */
+export const SCRAPED_DOMAINS: ScrapedDomain[] = [
+  { id: 'dom_acme_01',  clientId: 'acme',    domain: 'acmedental.com',     health: 'Healthy',  pageCount: 24, lastScrapedLabel: '2d ago' },
+  { id: 'dom_sea_01',   clientId: 'seaside', domain: 'seasideyoga.com',    health: 'Healthy',  pageCount: 9,  lastScrapedLabel: '5d ago' },
+  { id: 'dom_blm_01',   clientId: 'bloom',   domain: 'bloomandvine.co',    health: 'Warnings', pageCount: 14, lastScrapedLabel: '12h ago' },
+];
+
+/**
+ * Individual scraped pages. Path/title/words populated per the wireframe
+ * for acme; lightly seeded for seaside + bloom. In production these rows
+ * come from a crawler writing to the scraped_pages table.
+ */
+export const SCRAPED_PAGES: ScrapedPage[] = [
+  { id: 'pg_acme_01', clientId: 'acme', domainId: 'dom_acme_01', path: '/',                      title: 'Acme Dental — Family dentistry in 3 neighborhoods', words: 742,  lastScrapedLabel: '2d ago', analysisStatus: 'Done' },
+  { id: 'pg_acme_02', clientId: 'acme', domainId: 'dom_acme_01', path: '/about',                 title: 'Our story',                                          words: 612,  lastScrapedLabel: '2d ago', analysisStatus: 'Done' },
+  { id: 'pg_acme_03', clientId: 'acme', domainId: 'dom_acme_01', path: '/services',              title: 'Services overview',                                  words: 920,  lastScrapedLabel: '2d ago', analysisStatus: 'Done' },
+  { id: 'pg_acme_04', clientId: 'acme', domainId: 'dom_acme_01', path: '/services/invisalign',   title: 'Invisalign — clear aligners',                        words: 1280, lastScrapedLabel: '2d ago', analysisStatus: 'Done' },
+  { id: 'pg_acme_05', clientId: 'acme', domainId: 'dom_acme_01', path: '/services/crowns',       title: 'Same-day crowns',                                    words: 840,  lastScrapedLabel: '2d ago', analysisStatus: 'Done' },
+  { id: 'pg_acme_06', clientId: 'acme', domainId: 'dom_acme_01', path: '/locations/downtown',    title: 'Downtown location',                                  words: 410,  lastScrapedLabel: '2d ago', analysisStatus: 'Done' },
+  { id: 'pg_acme_07', clientId: 'acme', domainId: 'dom_acme_01', path: '/blog/saturday-hours',   title: 'Why we added Saturday hours',                        words: 680,  lastScrapedLabel: '9d ago', analysisStatus: 'Stale' },
+  { id: 'pg_acme_08', clientId: 'acme', domainId: 'dom_acme_01', path: '/contact',               title: 'Contact + directions',                               words: 240,  lastScrapedLabel: '2d ago', analysisStatus: 'Done' },
+
+  { id: 'pg_sea_01',  clientId: 'seaside', domainId: 'dom_sea_01', path: '/',           title: 'Seaside Yoga — classes on the coast',        words: 520, lastScrapedLabel: '5d ago', analysisStatus: 'Done' },
+  { id: 'pg_sea_02',  clientId: 'seaside', domainId: 'dom_sea_01', path: '/schedule',   title: 'Weekly schedule',                            words: 310, lastScrapedLabel: '5d ago', analysisStatus: 'Done' },
+  { id: 'pg_sea_03',  clientId: 'seaside', domainId: 'dom_sea_01', path: '/teachers',   title: 'Meet the teachers',                          words: 640, lastScrapedLabel: '5d ago', analysisStatus: 'Done' },
+
+  { id: 'pg_blm_01',  clientId: 'bloom',   domainId: 'dom_blm_01', path: '/',           title: 'Bloom & Vine — local florist',               words: 380, lastScrapedLabel: '12h ago', analysisStatus: 'Done' },
+  { id: 'pg_blm_02',  clientId: 'bloom',   domainId: 'dom_blm_01', path: '/shop',       title: 'Shop flowers + plants',                      words: 210, lastScrapedLabel: '12h ago', analysisStatus: 'Pending' },
+  { id: 'pg_blm_03',  clientId: 'bloom',   domainId: 'dom_blm_01', path: '/subscriptions', title: 'Weekly subscriptions',                    words: 260, lastScrapedLabel: '12h ago', analysisStatus: 'Failed' },
 ];
 
 export const COMPETITORS: Competitor[] = [
