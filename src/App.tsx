@@ -1,98 +1,27 @@
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import { AppStateProvider, useAppState } from './shell/AppState';
-import { Sidebar } from './shell/Sidebar';
-import { Topbar } from './shell/Topbar';
+import { Navigate, Route, Routes } from 'react-router-dom';
+import { AppStateProvider } from './shell/AppState';
+import { AppShell } from './shell/AppShell';
 import { DataProviderProvider } from './data/context';
 import { pickProvider } from './data/pickProvider';
-import { Placeholder } from './views/Placeholder';
-import { Overview } from './views/Overview';
-import { Clients } from './views/Clients';
-import { ClientDetail } from './views/client-detail/ClientDetail';
-import { AdPerf } from './views/AdPerf';
-import { AdStudio } from './views/AdStudio';
-import { BrandIntelligence } from './views/brand/BrandIntelligence';
-import { Calendar } from './views/Calendar';
-import { Approvals } from './views/Approvals';
-import { Publish } from './views/Publish';
-import { Reports } from './views/Reports';
-import { Settings } from './views/Settings';
-import { Billing } from './views/Billing';
-import { Auth } from './views/Auth';
-import { Onboard } from './views/Onboard';
-import { Golden } from './views/Golden';
-import { Components } from './views/Components';
-import { ROUTES } from './routes';
-
-function Shell() {
-  const { state } = useAppState();
-  const { pathname } = useLocation();
-  const current = ROUTES.find((r) => r.path === pathname);
-  const isFull = current?.full ?? false;
-
-  return (
-    <div
-      className="shell"
-      style={{ ['--side' as string]: state.sidebarCollapsed ? '64px' : '240px' }}
-    >
-      <Sidebar />
-      <div className="stack" style={{ overflow: 'hidden', minWidth: 0 }}>
-        {!isFull && <Topbar />}
-        <main className="shell-main" style={{ flex: 1, overflowY: 'auto' }}>
-          <Routes>
-            {ROUTES.map((r) => {
-              const element =
-                r.id === 'overview' ? (
-                  <Overview />
-                ) : r.id === 'clients' ? (
-                  <Clients />
-                ) : r.id === 'client-detail' ? (
-                  <ClientDetail />
-                ) : r.id === 'ad-perf' ? (
-                  <AdPerf />
-                ) : r.id === 'ad-studio' ? (
-                  <AdStudio />
-                ) : r.id === 'brand' ? (
-                  <BrandIntelligence />
-                ) : r.id === 'calendar' ? (
-                  <Calendar />
-                ) : r.id === 'approvals' ? (
-                  <Approvals />
-                ) : r.id === 'publish' ? (
-                  <Publish />
-                ) : r.id === 'reports' ? (
-                  <Reports />
-                ) : r.id === 'settings' ? (
-                  <Settings />
-                ) : r.id === 'billing' ? (
-                  <Billing />
-                ) : r.id === 'auth' ? (
-                  <Auth />
-                ) : r.id === 'onboard' ? (
-                  <Onboard />
-                ) : r.id === 'golden' ? (
-                  <Golden />
-                ) : r.id === 'components' ? (
-                  <Components />
-                ) : (
-                  <Placeholder title={r.label} note={`Route id: ${r.id}`} />
-                );
-              return <Route key={r.id} path={r.path} element={element} />;
-            })}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </main>
-      </div>
-    </div>
-  );
-}
 
 const provider = pickProvider();
 
+/**
+ * Top-level router.
+ *
+ *   /         → redirect to /dev (will become the live flow root once auth lands)
+ *   /dev/*    → design / wireframe reference, no auth, fixture or local-supabase data
+ *   /app/*    → (future) live, auth-gated product mounted by the same AppShell
+ */
 export default function App() {
   return (
     <AppStateProvider>
       <DataProviderProvider provider={provider}>
-        <Shell />
+        <Routes>
+          <Route path="/" element={<Navigate to="/dev" replace />} />
+          <Route path="/dev/*" element={<AppShell prefix="/dev" />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
       </DataProviderProvider>
     </AppStateProvider>
   );

@@ -1,10 +1,12 @@
 import { Fragment } from 'react';
 import { NavLink } from 'react-router-dom';
 import { Icon } from '../components/Icon';
-import { ROUTES, SECTION_LABELS, type SidebarSection } from '../routes';
+import { ROUTES, SECTION_LABELS, routePath, type SidebarSection } from '../routes';
 import { useAppState } from './AppState';
 
-export function Sidebar() {
+type Props = { prefix: string };
+
+export function Sidebar({ prefix }: Props) {
   const { state, set } = useAppState();
   const { mode, sidebarCollapsed: collapsed } = state;
 
@@ -39,7 +41,7 @@ export function Sidebar() {
           const showHeader = r.section !== currentSection;
           if (showHeader) currentSection = r.section;
           const label = r.labelByMode?.[mode] ?? r.label;
-          const target = r.navTo ?? r.path;
+          const target = routePath(prefix, r.navTo ?? r.subpath);
           return (
             <Fragment key={r.id}>
               {showHeader && !collapsed && (
@@ -48,7 +50,7 @@ export function Sidebar() {
               {showHeader && collapsed && <div style={{ height: 8 }} />}
               <NavLink
                 to={target}
-                end={r.path === '/'}
+                end={r.subpath === ''}
                 title={collapsed ? label : undefined}
                 className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
               >
