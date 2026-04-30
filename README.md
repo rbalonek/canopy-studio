@@ -108,6 +108,22 @@ See [`.env.example`](.env.example). Notable:
                                    overwritten by Claude Design itself.
 ```
 
+## Meta publishing roadmap
+
+Four publishing features confirmed viable against the Meta Graph API. To be
+built after the live-flow steps (auth, workspaces, `/app/*` guard, Meta token
+UI) are complete. Full implementation notes are in `CLAUDE.md`.
+
+| Feature | Status | Key caveat |
+|---|---|---|
+| Per-platform captions (separate FB / IG text + tags) | Planned | Two caption fields needed in the post composer; separate API calls by design |
+| Auto-publish to Stories (no phone tap required) | Planned | Interactive stickers (polls, link stickers) cannot be added via API — must be added manually in-app after publish |
+| Location tagging via Meta's place search | Planned | Always show the user the exact Meta-canonical place name before confirming — it may differ from what they typed. Not available on carousel posts. |
+| Multi-image carousel upload (up to 10 images) | Planned | Single multi-file picker in UI; N+1 API calls happen server-side. Location tags not supported on carousels. |
+
+All four require Meta App Review (Advanced Access) before the app can serve
+external clients — plan for a 2–4 week review window.
+
 ## Common tasks
 
 **Add a view** — drop a component in `src/views/`, register it in the

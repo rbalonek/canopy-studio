@@ -125,6 +125,77 @@ supabase db query --linked --file supabase/seed.sql    # seed
 supabase db query --linked --output table 'select ...' # ad-hoc
 ```
 
+## Meta publishing features (confirmed API-capable)
+
+Four features confirmed viable against the Meta Graph API (researched April
+2026). These extend the live-flow plan and should be built after step 6.
+
+### 1. Per-platform captions with separate account tags
+**Build it.** FB and IG are entirely separate API calls (`POST /{page_id}/feed`
+and `POST /{ig_user_id}/media`) with independent `message`/`caption` fields.
+The UI needs two caption inputs when both channels are selected — one for FB,
+one for IG. Store as `captionFb` / `captionIg` on the post record (the current
+`QueuedPost` type has a single implicit caption; split it). Each caption can
+tag the platform-appropriate page handle independently.
+
+### 2. Auto-publish to Stories
+**Build it — with a clear UI caveat.** Both Instagram and Facebook Stories
+publish fully server-side via the Graph API with no user interaction required.
+IG: `POST /{ig_user_id}/media` with `media_type=STORIES`, then
+`POST /{ig_user_id}/media_publish`. FB: `POST /{page_id}/photo_stories` or
+`/{page_id}/video_stories`.
+
+Add `'Story'` to the `fmt` union in `types.ts` (`'Post' | 'Reel' | 'Carousel' | 'Story'`).
+
+**Hard limit — surface in the UI:** Interactive stickers (polls, link stickers,
+hashtag stickers) cannot be added via any Meta API — this applies to all
+third-party tools, not just us. Plain image/video Stories auto-publish fine.
+Show a persistent notice on the Story composer: "Polls and link stickers must
+be added manually in the Instagram app after publishing."
+
+### 3. Location tagging (Meta canonical place names)
+**Build it — with a search-and-confirm flow.** Pass a `location_id` (a
+Facebook Page ID with lat/lng data) to the IG media endpoint. Populate via
+Pages Search: `GET /pages/search?q={text}&fields=id,name,location`.
+
+**Key caveat to design around:** Meta's Instagram-native place-search endpoint
+was deprecated in 2020 with no replacement. The name that appears on the post
+is the Facebook Page's name, which may differ from what the user typed (e.g.
+searching "Bridgehampton, NY" may return a page named "Bridgehampton Long
+Island"). Always show the user the exact name that will appear before they
+confirm — never silently use the first result.
+
+**Second caveat:** `location_id` is not supported on Carousel posts — only
+single image/video posts and Reels. Disable the location field when format is
+Carousel and show a tooltip explaining why.
+
+Permissions needed: `Page Public Metadata Access` feature (requires App
+Review).
+
+### 4. Multi-image carousel upload
+**Build it.** The API supports carousels up to 10 items. The flow is N+1
+calls — one `POST /{ig_user_id}/media` per image (with `is_carousel_item=true`
+and `image_url`), then one carousel-container call listing the child IDs, then
+`media_publish`. Fire the per-image calls in parallel; assemble the container
+once all IDs return. From the user's perspective this should be a single
+multi-file picker (drag-and-drop, select multiple) — the sequential API calls
+are invisible.
+
+Hard limits to enforce in the UI: max 10 images, all images crop to the first
+image's aspect ratio (warn the user), and location tags are not available on
+carousels (see feature 3 above).
+
+The current `QueuedPost.fmt` of `'Carousel'` is already in the type system;
+the missing piece is a `carouselImages: string[]` field on the post record.
+
+### App Review requirement (all four features)
+All four require Advanced Access + Meta App Review once the app serves
+external clients (not just accounts you own). Plan for a 2–4 week review
+window. The relevant permissions are:
+- `pages_manage_posts` + `pages_read_engagement` — Facebook posting
+- `instagram_business_content_publish` + `instagram_business_basic` — IG posting + Stories
+- `Page Public Metadata Access` feature — location search
+
 ## Don't
 
 - Don't import from `src/data/mock.ts` in views. Always use
