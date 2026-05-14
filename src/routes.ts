@@ -8,6 +8,8 @@ export type RouteId =
   | 'campaign-detail'
   | 'adset-detail'
   | 'ad-detail'
+  | 'client-ad-studio'
+  | 'location-ad-studio'
   | 'ad-perf'
   | 'calendar'
   | 'ad-studio'
@@ -73,6 +75,8 @@ export const ROUTES: RouteDef[] = [
   { id: 'campaign-detail', subpath: 'clients/:id/campaigns/:campaignId', navTo: '', label: 'Campaign Detail', icon: 'chart', section: 'workspace', hidden: true },
   { id: 'adset-detail',    subpath: 'clients/:id/campaigns/:campaignId/adsets/:adSetId', navTo: '', label: 'Ad Set Detail', icon: 'chart', section: 'workspace', hidden: true },
   { id: 'ad-detail',       subpath: 'clients/:id/campaigns/:campaignId/adsets/:adSetId/ads/:adId', navTo: '', label: 'Ad Detail', icon: 'chart', section: 'workspace', hidden: true },
+  { id: 'client-ad-studio',   subpath: 'clients/:id/ad-studio',                  navTo: '', label: 'Ad Studio (client)',   icon: 'sparkles', section: 'workspace', hidden: true, ai: true },
+  { id: 'location-ad-studio', subpath: 'clients/:id/locations/:locId/ad-studio', navTo: '', label: 'Ad Studio (location)', icon: 'sparkles', section: 'workspace', hidden: true, ai: true },
   { id: 'ad-perf',       subpath: 'ad-performance', label: 'Ad Performance',   icon: 'chart',    section: 'workspace' },
   { id: 'calendar',      subpath: 'calendar',      label: 'Content Calendar',  icon: 'calendar', section: 'workspace' },
   { id: 'ad-studio',     subpath: 'ad-studio',     label: 'Ad Studio',         icon: 'sparkles', section: 'workspace', ai: true },

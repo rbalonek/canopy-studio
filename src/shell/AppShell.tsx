@@ -18,6 +18,7 @@ import { BrandIntelligence } from '../views/brand/BrandIntelligence';
 import { AdDetail } from '../views/campaigns/AdDetail';
 import { AdSetDetail } from '../views/campaigns/AdSetDetail';
 import { CampaignDetail } from '../views/campaigns/CampaignDetail';
+import { ScopedAdStudio } from '../views/campaigns/ScopedAdStudio';
 import { ClientDetail } from '../views/client-detail/ClientDetail';
 import { LocationDetail } from '../views/client-detail/LocationDetail';
 import { ROUTES, type RouteId } from '../routes';
@@ -33,6 +34,8 @@ const VIEWS: Record<RouteId, () => JSX.Element> = {
   'campaign-detail': () => <CampaignDetail />,
   'adset-detail': () => <AdSetDetail />,
   'ad-detail': () => <AdDetail />,
+  'client-ad-studio': () => <ScopedAdStudio />,
+  'location-ad-studio': () => <ScopedAdStudio />,
   'ad-perf': () => <AdPerf />,
   calendar: () => <Calendar />,
   'ad-studio': () => <AdStudio />,

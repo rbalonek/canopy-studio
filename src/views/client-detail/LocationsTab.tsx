@@ -146,6 +146,10 @@ export function LocationsTab({ clientId, parentName }: Props) {
             parentName={parentName}
             liveAggs={l.adAccountId ? aggsByAccount[l.adAccountId] : undefined}
             onOpen={() => openLocation(l)}
+            onAdStudio={() => {
+              const p = workspace ? `/app/${workspace.slug}` : '/dev';
+              navigate(`${p}/clients/${clientId}/locations/${l.id}/ad-studio`);
+            }}
             onEdit={() => setFormState(l.id)}
             onDelete={() => onDelete(l)}
           />
@@ -192,6 +196,7 @@ function LocationCard({
   parentName,
   liveAggs,
   onOpen,
+  onAdStudio,
   onEdit,
   onDelete,
 }: {
@@ -199,6 +204,7 @@ function LocationCard({
   parentName: string;
   liveAggs?: { mtdSpend: number; activeCampaigns: number };
   onOpen: () => void;
+  onAdStudio: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
@@ -276,6 +282,9 @@ function LocationCard({
       <div className="row gap-6">
         <button className="btn sm" onClick={onOpen}>
           Open
+        </button>
+        <button className="btn ai sm" onClick={onAdStudio}>
+          Ad Studio
         </button>
         <button className="btn ghost sm" onClick={onEdit}>
           Edit

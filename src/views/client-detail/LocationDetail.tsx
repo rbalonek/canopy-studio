@@ -187,6 +187,14 @@ export function LocationDetail() {
             <Icon name="refresh" size={14} />
             {refreshing ? ' Refreshing…' : ' Refresh META'}
           </button>
+          <button
+            className="btn ai"
+            onClick={() =>
+              navigate(`${prefix}/clients/${clientId}/locations/${location.id}/ad-studio`)
+            }
+          >
+            <Icon name="sparkles" size={14} /> Ad Studio
+          </button>
           <button className="btn ghost" onClick={() => setEditing(true)}>
             <Icon name="link" size={14} /> Edit
           </button>

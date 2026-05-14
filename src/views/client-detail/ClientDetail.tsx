@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../../auth/supabaseClient';
 import { Icon } from '../../components/Icon';
 import { useQuery } from '../../data/context';
@@ -28,9 +28,11 @@ const BASE_TABS: TabId[] = ['overview', 'brand', 'assets', 'scraped pages', 'com
 export function ClientDetail() {
   const { state } = useAppState();
   const workspace = useWorkspace();
+  const navigate = useNavigate();
   const params = useParams<{ id: string }>();
   const clientId = params.id ?? '';
-  const clientsPath = (workspace ? `/app/${workspace.slug}` : '/dev') + '/clients';
+  const shellPrefix = workspace ? `/app/${workspace.slug}` : '/dev';
+  const clientsPath = `${shellPrefix}/clients`;
 
   const { data: header, loading } = useQuery<ClientHeader | null>(
     (p) => p.getClientHeader(clientId),
@@ -136,6 +138,17 @@ export function ClientDetail() {
             <Icon name="refresh" size={14} />
             {refreshing ? ' Refreshing…' : ' Refresh META'}
           </button>
+          {/* Client-level Ad Studio: shown when this is a single-location
+              setup (or no locations yet). Multi-location clients drive Ad
+              Studio per-location to scope to each Page's brand + audience. */}
+          {header.locationCount <= 1 && (
+            <button
+              className="btn ai"
+              onClick={() => navigate(`${shellPrefix}/clients/${clientId}/ad-studio`)}
+            >
+              <Icon name="sparkles" size={14} /> Ad Studio
+            </button>
+          )}
           <button className="btn ai">
             <Icon name="sparkles" size={14} /> AI analyze
           </button>
