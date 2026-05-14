@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useAuth } from '../auth/AuthProvider';
 import { AIBadge } from '../components/AIBadge';
 import { AreaChart } from '../components/AreaChart';
 import { DeltaSpark } from '../components/DeltaSpark';
@@ -17,13 +18,32 @@ const PERIODS = ['Today', '7d', 'MTD', '30d', '90d', 'Custom'] as const;
 
 const parseNum = (s: string) => parseFloat(s.replace(/[^0-9.-]/g, '')) || 0;
 
+function pickGreeting(d: Date): string {
+  const h = d.getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
 export function Overview() {
   const { state } = useAppState();
+  const auth = useAuth();
   const entity = state.mode === 'agency' ? 'clients' : 'locations';
 
   const { data: clients } = useQuery<Client[]>((p) => p.listClients());
   const { data: perf } = useQuery<ClientPerfRow[]>((p) => p.listClientPerf());
   const { data: urgent } = useQuery<UrgentIssue[]>((p) => p.listUrgent());
+
+  const displayName =
+    (typeof auth.user?.user_metadata?.display_name === 'string'
+      ? auth.user.user_metadata.display_name
+      : null) ?? auth.user?.email?.split('@')[0];
+  const greeting = pickGreeting(new Date());
+  const todayLabel = new Date().toLocaleDateString(undefined, {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+  });
 
   const [scope, setScope] = useState<Scope>('all');
   const [picker, setPicker] = useState(false);
@@ -69,17 +89,20 @@ export function Overview() {
       ? scope.slice(4)
       : scope.slice(4);
 
-  const totalPerf = perf?.length ?? 0;
+  const totalClients = clients?.length ?? 0;
 
   return (
     <div className="content wide">
       <div className="row between" style={{ marginBottom: 20 }}>
         <div className="stack gap-4">
           <span className="meta">
-            Tuesday, Apr 21 · <span style={{ color: 'var(--fg)' }}>{scopeLabel}</span> ·{' '}
-            {filtered.length} {entity}
+            {todayLabel} · <span style={{ color: 'var(--fg)' }}>{scopeLabel}</span> ·{' '}
+            {totalClients} {entity}
           </span>
-          <h1 className="h0">Good afternoon, Jordan.</h1>
+          <h1 className="h0">
+            {greeting}
+            {displayName ? `, ${displayName}` : ''}.
+          </h1>
         </div>
         <div className="row gap-8">
           <div className="seg">
@@ -106,7 +129,7 @@ export function Overview() {
               className={`pill ${scope === 'all' ? 'teal' : ''}`}
               style={{ border: 0, cursor: 'pointer', font: 'inherit' }}
             >
-              {scope === 'all' && <span className="dot" />}All {entity} · {totalPerf}
+              {scope === 'all' && <span className="dot" />}All {entity} · {totalClients}
             </button>
             <span style={{ color: 'var(--border)' }}>│</span>
             {industries.map((ind) => {
@@ -163,13 +186,13 @@ export function Overview() {
       </div>
 
       <div className="grid grid-4 gap-16" style={{ gap: 16, marginBottom: 16 }}>
-        <KPI label="Total Spend" value={`$${Math.round(totalSpend).toLocaleString()}`} delta={12.4} seed={3} />
-        <KPI label="Conversions" value={totalConv.toLocaleString()} delta={-6.1} seed={7} />
-        <KPI label="Avg ROAS" value={`${avgRoas.toFixed(1)}×`} delta={4.2} seed={2} />
+        <KPI label="Total Spend" value={`$${Math.round(totalSpend).toLocaleString()}`} delta={0} seed={3} />
+        <KPI label="Conversions" value={totalConv.toLocaleString()} delta={0} seed={7} />
+        <KPI label="Avg ROAS" value={`${avgRoas.toFixed(1)}×`} delta={0} seed={2} />
         <KPI
           label="Avg CPL"
           value={`$${Math.round(avgCpl)}`}
-          delta={-2.1}
+          delta={0}
           seed={9}
           sub={`Scope: ${filtered.length} ${entity}`}
         />
@@ -177,10 +200,14 @@ export function Overview() {
 
       <div className="grid grid-4 gap-16" style={{ gap: 16, marginBottom: 24 }}>
         {[
-          { label: 'Active campaigns', value: '42', meta: 'Across 9 clients' },
-          { label: 'Posts pending approval', value: '11', meta: '3 AI-drafted' },
-          { label: 'Scheduled (next 7d)', value: '28', meta: '14 FB · 14 IG' },
-          { label: 'Open AI suggestions', value: '6', meta: '2 high priority', ai: true },
+          {
+            label: 'Active campaigns',
+            value: '0',
+            meta: totalClients ? `Across ${totalClients} ${entity}` : 'No campaigns yet',
+          },
+          { label: 'Posts pending approval', value: '0', meta: 'Nothing in queue' },
+          { label: 'Scheduled (next 7d)', value: '0', meta: 'Nothing scheduled' },
+          { label: 'Open AI suggestions', value: '0', meta: 'Suggestions appear after Meta is connected', ai: true },
         ].map((c) => (
           <div key={c.label} className={`card card-pad stack gap-6 ${c.ai ? 'ai-surface' : ''}`}>
             <div className="row between">

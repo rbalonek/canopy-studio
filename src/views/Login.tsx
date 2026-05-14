@@ -19,6 +19,7 @@ const OAUTH_PROVIDERS: { id: OAuthProvider; label: string }[] = [
 export function Login() {
   const auth = useAuth();
   const [mode, setMode] = useState<Mode>('login');
+  const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -36,7 +37,11 @@ export function Login() {
       // On success, AuthProvider's onAuthStateChange flips `user`, and
       // the RootGate re-renders us out of the way.
     } else if (mode === 'signup') {
-      const { error, needsConfirmation } = await auth.signUp(email, password);
+      const { error, needsConfirmation } = await auth.signUp(
+        email,
+        password,
+        displayName.trim() || undefined,
+      );
       setSubmitting(false);
       if (error) {
         setMessage({ kind: 'error', text: error.message });
@@ -141,6 +146,20 @@ export function Login() {
           )}
 
           <form className="stack gap-10" onSubmit={onSubmit}>
+            {mode === 'signup' && (
+              <label className="stack gap-4">
+                <span className="meta">Full name</span>
+                <input
+                  type="text"
+                  autoComplete="name"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder="Jordan Smith"
+                  style={inputStyle}
+                  disabled={submitting}
+                />
+              </label>
+            )}
             <label className="stack gap-4">
               <span className="meta">Email</span>
               <input

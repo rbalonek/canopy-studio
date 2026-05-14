@@ -77,10 +77,16 @@ export function LiveOnboard() {
     }
 
     // 2. Profile (idempotent — upsert in case it already exists from a
-    // prior attempt). Display name defaults to the email's local-part.
+    // prior attempt). Prefer the display name captured at signup
+    // (user_metadata.display_name), falling back to the email's
+    // local-part for accounts created before that field existed.
+    const metaName =
+      typeof auth.user.user_metadata?.display_name === 'string'
+        ? auth.user.user_metadata.display_name
+        : null;
     await supabase.from('profiles').upsert({
       id: auth.user.id,
-      display_name: auth.user.email?.split('@')[0] ?? null,
+      display_name: metaName ?? auth.user.email?.split('@')[0] ?? null,
       mode,
     });
 

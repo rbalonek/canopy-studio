@@ -16,6 +16,7 @@ type AuthContextValue = AuthState & {
   signUp(
     email: string,
     password: string,
+    displayName?: string,
   ): Promise<{ error: Error | null; needsConfirmation: boolean }>;
   signInWithOAuth(provider: OAuthProvider): Promise<{ error: Error | null }>;
   signOut(): Promise<void>;
@@ -79,14 +80,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       return { error };
     },
-    async signUp(email, password) {
+    async signUp(email, password, displayName) {
       if (!supabase) {
         return { error: new Error('Supabase not configured'), needsConfirmation: false };
       }
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
-        options: { emailRedirectTo: `${window.location.origin}/` },
+        options: {
+          emailRedirectTo: `${window.location.origin}/`,
+          data: displayName ? { display_name: displayName } : undefined,
+        },
       });
       // With email confirmation on, session is null until the user clicks
       // the link in their inbox.
