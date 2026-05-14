@@ -32,18 +32,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setState({ session: null, user: null, loading: false });
       return;
     }
-    // Validate the cached session against the server. getSession() reads
-    // localStorage and trusts it; getUser() actually verifies the JWT.
-    // If the underlying user no longer exists (e.g. local DB was reset
-    // since the token was issued) we clear the stale session so the user
-    // sees Login instead of silently failing every RLS check.
+    let active = true;
+
+    // Skip the INITIAL_SESSION event — it fires with the cached session
+    // before our validator below has had a chance to verify it, and would
+    // otherwise race our signOut() and put the stale session back.
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!active) return;
+      if (event === 'INITIAL_SESSION') return;
+      setState({ session, user: session?.user ?? null, loading: false });
+    });
+
+    // Validate the cached session against the server. getSession() trusts
+    // localStorage; getUser() round-trips the JWT to the server. If the
+    // underlying user no longer exists (e.g. local DB was reset since the
+    // token was issued, or the token is from a different project) we
+    // clear the stale session so the UI shows Login instead of silently
+    // failing every RLS check.
     (async () => {
       const { data: sessionData } = await supabase!.auth.getSession();
+      if (!active) return;
       if (!sessionData.session) {
         setState({ session: null, user: null, loading: false });
         return;
       }
       const { data: userData, error } = await supabase!.auth.getUser();
+      if (!active) return;
       if (error || !userData.user) {
         await supabase!.auth.signOut();
         setState({ session: null, user: null, loading: false });
@@ -51,10 +65,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       setState({ session: sessionData.session, user: userData.user, loading: false });
     })();
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      setState({ session, user: session?.user ?? null, loading: false });
-    });
-    return () => sub.subscription.unsubscribe();
+
+    return () => {
+      active = false;
+      sub.subscription.unsubscribe();
+    };
   }, []);
 
   const value: AuthContextValue = {

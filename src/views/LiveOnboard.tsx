@@ -41,6 +41,16 @@ export function LiveOnboard() {
     setSubmitting(true);
     setError(null);
 
+    // Re-fetch the session right before the insert. If it doesn't match
+    // the validated user (or is missing), we know the stored JWT is dead
+    // and should bail rather than hit the server with a doomed insert.
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData.session || sessionData.session.user.id !== auth.user.id) {
+      setSubmitting(false);
+      await handleStaleSession();
+      return false;
+    }
+
     const slug = `${slugify(workspaceName)}-${randomSuffix()}`;
 
     // 1. Workspace (the trigger adds the owner to workspace_members)
@@ -56,6 +66,14 @@ export function LiveOnboard() {
       .single();
     if (wsErr || !ws) {
       setSubmitting(false);
+      // RLS rejection almost always means the JWT didn't validate
+      // server-side (auth.uid() came back null), which is unrecoverable
+      // without a fresh sign-in. Bail cleanly instead of showing the
+      // bare Postgres error.
+      if (wsErr?.message?.includes('row-level security')) {
+        await handleStaleSession();
+        return false;
+      }
       setError(wsErr?.message ?? 'Failed to create workspace');
       return false;
     }
@@ -93,6 +111,15 @@ export function LiveOnboard() {
   async function onFinish() {
     const ok = await persist();
     if (ok) navigate('/');
+  }
+
+  async function handleStaleSession() {
+    // The JWT in localStorage isn't valid against this Supabase project
+    // (most often happens after a local `supabase db reset` wipes
+    // auth.users, or when the env URL changed between hosted and local).
+    // Sign the user out so RootGate shows Login and they can re-auth.
+    await auth.signOut();
+    navigate('/');
   }
 
   return (
