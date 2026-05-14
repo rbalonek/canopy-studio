@@ -345,11 +345,20 @@ async function refreshFromMeta(
   }
 
   // For each campaign, pull ad sets, then for each ad set pull ads.
+  // Per-set errors land in summary.errors so a rate limit on one node
+  // doesn't abort the rest of the batch.
   for (const c of campaigns) {
     try {
-      await refreshAdSetsForCampaign(c.id, clientId, acct, accessToken, service);
+      const { errors: adErrors } = await refreshAdSetsForCampaign(
+        c.id,
+        clientId,
+        acct,
+        accessToken,
+        service,
+      );
+      if (adErrors.length) errors.push(...adErrors.map((e) => `${c.name}: ${e}`));
     } catch (e) {
-      errors.push(`ad_sets for ${c.id}: ${(e as Error).message}`);
+      errors.push(`ad_sets for ${c.name}: ${(e as Error).message}`);
     }
   }
 
@@ -362,24 +371,32 @@ async function refreshAdSetsForCampaign(
   adAccountId: string,
   accessToken: string,
   service: ReturnType<typeof createClient>,
-): Promise<void> {
+): Promise<{ errors: string[] }> {
   const url = new URL(`${META_GRAPH}/${campaignId}/adsets`);
   url.searchParams.set('fields', 'id,name,status,optimization_goal');
   url.searchParams.set('access_token', accessToken);
   url.searchParams.set('limit', '100');
 
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`/adsets ${res.status}: ${await res.text()}`);
-  const adSets = ((await res.json()).data ?? []) as Array<{
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(formatMetaError(`/adsets ${res.status}`, body));
+  }
+  const allAdSets = ((await res.json()).data ?? []) as Array<{
     id: string;
     name: string;
     status: string;
     optimization_goal?: string;
   }>;
 
+  // Skip ARCHIVED/DELETED — saves the insights calls AND keeps the
+  // table aligned with the active surface area.
+  const adSets = allAdSets.filter((a) => a.status !== 'ARCHIVED' && a.status !== 'DELETED');
+
   const now = new Date().toISOString();
   const adSetRows: Array<Record<string, unknown>> = [];
 
+  // First pass: pull insights and collect rows. NO ads work yet.
   for (const a of adSets) {
     const [mtd, daily] = await Promise.all([
       getNodeInsights(a.id, 'this_month', accessToken),
@@ -416,15 +433,26 @@ async function refreshAdSetsForCampaign(
       last_refreshed_at: now,
       updated_at: now,
     });
-
-    // Ads under this ad set
-    await refreshAdsForAdSet(a.id, campaignId, clientId, adAccountId, accessToken, service);
   }
 
+  // Upsert ad_sets BEFORE fetching ads — the ads FK references ad_sets.id,
+  // so ad_sets need to be in the DB first.
   if (adSetRows.length > 0) {
     const { error } = await service.from('ad_sets').upsert(adSetRows, { onConflict: 'id' });
     if (error) throw new Error(`ad_sets upsert: ${error.message}`);
   }
+
+  // Second pass: ads under each ad set. Collect per-set errors instead of
+  // bailing — a rate limit on one set shouldn't poison the whole batch.
+  const errors: string[] = [];
+  for (const a of adSets) {
+    try {
+      await refreshAdsForAdSet(a.id, campaignId, clientId, adAccountId, accessToken, service);
+    } catch (e) {
+      errors.push(`ads for ${a.id}: ${(e as Error).message}`);
+    }
+  }
+  return { errors };
 }
 
 async function refreshAdsForAdSet(
@@ -441,12 +469,18 @@ async function refreshAdsForAdSet(
   url.searchParams.set('limit', '100');
 
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`/ads ${res.status}: ${await res.text()}`);
-  const ads = ((await res.json()).data ?? []) as Array<{
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(formatMetaError(`/ads ${res.status}`, body));
+  }
+  const allAds = ((await res.json()).data ?? []) as Array<{
     id: string;
     name: string;
     status: string;
   }>;
+
+  // Skip ARCHIVED/DELETED — same reasoning as ad sets.
+  const ads = allAds.filter((a) => a.status !== 'ARCHIVED' && a.status !== 'DELETED');
 
   const now = new Date().toISOString();
   const adRows: Array<Record<string, unknown>> = [];
@@ -492,6 +526,22 @@ async function refreshAdsForAdSet(
   if (adRows.length > 0) {
     const { error } = await service.from('ads').upsert(adRows, { onConflict: 'id' });
     if (error) throw new Error(`ads upsert: ${error.message}`);
+  }
+}
+
+/** Format a Meta Graph API error response into something human-readable.
+ * Rate-limit errors get an explicit "wait a few minutes" hint. */
+function formatMetaError(prefix: string, body: string): string {
+  try {
+    const j = JSON.parse(body);
+    const err = j.error;
+    if (!err) return `${prefix}: ${body}`;
+    if (err.code === 17 || err.error_subcode === 2446079) {
+      return `${prefix}: Meta API rate limit reached for this ad account. Wait a few minutes and try again.`;
+    }
+    return `${prefix}: ${err.error_user_msg ?? err.message ?? body}`;
+  } catch {
+    return `${prefix}: ${body}`;
   }
 }
 
