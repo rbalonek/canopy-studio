@@ -41,7 +41,9 @@ export function LocationsTab({ clientId, parentName }: Props) {
     }
     const { data, error } = await supabase
       .from('locations')
-      .select('id, name, address, mtd_spend, active_campaigns, posts_per_week, complete')
+      .select(
+        'id, name, address, mtd_spend, active_campaigns, posts_per_week, complete, page_id, instagram_business_account_id',
+      )
       .eq('client_id', clientId)
       .order('name');
     if (error || !data) {
@@ -57,6 +59,8 @@ export function LocationsTab({ clientId, parentName }: Props) {
         activeCampaigns: r.active_campaigns as number,
         postsPerWeek: r.posts_per_week as number,
         complete: r.complete as number,
+        pageId: (r.page_id as string | null) ?? null,
+        instagramBusinessAccountId: (r.instagram_business_account_id as string | null) ?? null,
       })),
     );
   }
@@ -100,6 +104,26 @@ export function LocationsTab({ clientId, parentName }: Props) {
               <span style={{ fontWeight: 500 }}>{l.postsPerWeek}</span>
             </div>
           </div>
+          {(l.pageId || l.instagramBusinessAccountId) && (
+            <div className="stack gap-2" style={{ paddingTop: 4 }}>
+              {l.pageId && (
+                <div className="row gap-6" style={{ fontSize: 11 }}>
+                  <span className="meta">FB Page</span>
+                  <span className="mono" style={{ color: 'var(--fg-2)' }}>
+                    {l.pageId}
+                  </span>
+                </div>
+              )}
+              {l.instagramBusinessAccountId && (
+                <div className="row gap-6" style={{ fontSize: 11 }}>
+                  <span className="meta">IG Business</span>
+                  <span className="mono" style={{ color: 'var(--fg-2)' }}>
+                    {l.instagramBusinessAccountId}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
           <div
             className="meta"
             style={{ fontSize: 11, padding: '6px 8px', background: 'var(--bg-2)', borderRadius: 4 }}
@@ -158,6 +182,8 @@ function AddLocationForm({
 }) {
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
+  const [pageId, setPageId] = useState('');
+  const [igAccountId, setIgAccountId] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -180,10 +206,8 @@ function AddLocationForm({
       client_id: clientId,
       name: name.trim(),
       address: address.trim(),
-      mtd_spend: '$0',
-      active_campaigns: 0,
-      posts_per_week: 0,
-      complete: 0,
+      page_id: pageId.trim() || null,
+      instagram_business_account_id: igAccountId.trim() || null,
     });
 
     setSubmitting(false);
@@ -208,7 +232,7 @@ function AddLocationForm({
           autoFocus
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Acme Dental — Downtown"
+          placeholder="Big Air — Burnsville"
           style={inputStyle}
           disabled={submitting}
         />
@@ -219,10 +243,36 @@ function AddLocationForm({
           type="text"
           value={address}
           onChange={(e) => setAddress(e.target.value)}
-          placeholder="284 Ember Row"
+          placeholder="14290 Plymouth Ave Burnsville MN"
           style={inputStyle}
           disabled={submitting}
         />
+      </label>
+      <label className="stack gap-4">
+        <span className="meta">Facebook Page ID (optional)</span>
+        <input
+          type="text"
+          value={pageId}
+          onChange={(e) => setPageId(e.target.value)}
+          placeholder="1234567890"
+          style={inputStyle}
+          disabled={submitting}
+        />
+      </label>
+      <label className="stack gap-4">
+        <span className="meta">Instagram Business ID (optional)</span>
+        <input
+          type="text"
+          value={igAccountId}
+          onChange={(e) => setIgAccountId(e.target.value)}
+          placeholder="17841400000000000"
+          style={inputStyle}
+          disabled={submitting}
+        />
+        <span className="meta" style={{ fontSize: 11 }}>
+          Uses the parent client's Meta access token — these IDs scope which Page/IG account this
+          location publishes to and pulls insights from.
+        </span>
       </label>
       {error && (
         <div className="meta" style={{ color: 'var(--danger, #c33)', fontSize: 11 }}>

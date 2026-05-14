@@ -17,6 +17,10 @@ export type Location = {
   postsPerWeek: number;
   /** Brand completeness 0-100 */
   complete: number;
+  /** Facebook Page ID for this location (uses parent client's access token). */
+  pageId?: string | null;
+  /** Instagram Business account ID for this location (same token as the Page). */
+  instagramBusinessAccountId?: string | null;
 };
 
 export type Client = {
