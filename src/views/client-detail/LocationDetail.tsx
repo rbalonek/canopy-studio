@@ -5,6 +5,7 @@ import { Icon } from '../../components/Icon';
 import { Ring } from '../../components/Ring';
 import type { Location } from '../../data/types';
 import { useWorkspace } from '../../workspace/WorkspaceProvider';
+import { CampaignsTable } from '../campaigns/CampaignsTable';
 
 /**
  * Per-location detail page. A location is essentially a sub-client —
@@ -241,9 +242,15 @@ export function LocationDetail() {
         />
       )}
 
+      {location.adAccountId && (
+        <div style={{ marginTop: 16 }}>
+          <CampaignsTable adAccountId={location.adAccountId} />
+        </div>
+      )}
+
       <div className="meta" style={{ fontSize: 11, marginTop: 16 }}>
-        Campaign data, posts, and brand intelligence for this location will appear here once we
-        port more of the Meta + scraping pipeline.
+        Posts, brand intelligence, and ad-set / ad drill-downs for this location will appear here
+        once we port more of the Meta + scraping pipeline.
       </div>
     </div>
   );

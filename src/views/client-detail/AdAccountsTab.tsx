@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { supabase } from '../../auth/supabaseClient';
 import { Icon } from '../../components/Icon';
+import { CampaignsTable } from '../campaigns/CampaignsTable';
 
 /**
  * Reads + writes a single meta_accounts row per client. Holds the
@@ -58,31 +59,32 @@ export function AdAccountsTab({ clientId }: { clientId: string }) {
     return <div className="meta">Loading…</div>;
   }
 
-  if (editing || !connection) {
-    return (
-      <ConnectionForm
-        clientId={clientId}
-        existing={connection ?? null}
-        onSaved={() => {
-          setEditing(false);
-          refresh();
-        }}
-        onCancel={connection ? () => setEditing(false) : undefined}
-      />
-    );
-  }
-
   return (
-    <ConnectionCard
-      connection={connection}
-      onEdit={() => setEditing(true)}
-      onDisconnect={async () => {
-        if (!supabase) return;
-        if (!confirm('Disconnect Meta from this client? Stored token will be removed.')) return;
-        await supabase.from('meta_accounts').delete().eq('client_id', clientId);
-        refresh();
-      }}
-    />
+    <div className="stack gap-16">
+      {editing || !connection ? (
+        <ConnectionForm
+          clientId={clientId}
+          existing={connection ?? null}
+          onSaved={() => {
+            setEditing(false);
+            refresh();
+          }}
+          onCancel={connection ? () => setEditing(false) : undefined}
+        />
+      ) : (
+        <ConnectionCard
+          connection={connection}
+          onEdit={() => setEditing(true)}
+          onDisconnect={async () => {
+            if (!supabase) return;
+            if (!confirm('Disconnect Meta from this client? Stored token will be removed.')) return;
+            await supabase.from('meta_accounts').delete().eq('client_id', clientId);
+            refresh();
+          }}
+        />
+      )}
+      <CampaignsTable clientId={clientId} />
+    </div>
   );
 }
 
