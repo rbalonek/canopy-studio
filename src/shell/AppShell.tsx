@@ -15,6 +15,7 @@ import { Publish } from '../views/Publish';
 import { Reports } from '../views/Reports';
 import { Settings } from '../views/Settings';
 import { BrandIntelligence } from '../views/brand/BrandIntelligence';
+import { AdDetail } from '../views/campaigns/AdDetail';
 import { AdSetDetail } from '../views/campaigns/AdSetDetail';
 import { CampaignDetail } from '../views/campaigns/CampaignDetail';
 import { ClientDetail } from '../views/client-detail/ClientDetail';
@@ -31,6 +32,7 @@ const VIEWS: Record<RouteId, () => JSX.Element> = {
   'location-detail': () => <LocationDetail />,
   'campaign-detail': () => <CampaignDetail />,
   'adset-detail': () => <AdSetDetail />,
+  'ad-detail': () => <AdDetail />,
   'ad-perf': () => <AdPerf />,
   calendar: () => <Calendar />,
   'ad-studio': () => <AdStudio />,

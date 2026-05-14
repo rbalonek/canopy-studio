@@ -464,7 +464,18 @@ async function refreshAdsForAdSet(
   service: ReturnType<typeof createClient>,
 ): Promise<void> {
   const url = new URL(`${META_GRAPH}/${adSetId}/ads`);
-  url.searchParams.set('fields', 'id,name,status');
+  url.searchParams.set(
+    'fields',
+    [
+      'id',
+      'name',
+      'status',
+      // Expand the creative object inline so we get destination URL,
+      // headline, body, image/thumbnail, and call-to-action without an
+      // extra round-trip per ad.
+      'creative{id,image_url,thumbnail_url,object_story_spec,asset_feed_spec,call_to_action_type}',
+    ].join(','),
+  );
   url.searchParams.set('access_token', accessToken);
   url.searchParams.set('limit', '100');
 
@@ -477,6 +488,7 @@ async function refreshAdsForAdSet(
     id: string;
     name: string;
     status: string;
+    creative?: Record<string, any>;
   }>;
 
   // Skip ARCHIVED/DELETED — same reasoning as ad sets.
@@ -494,6 +506,8 @@ async function refreshAdsForAdSet(
     const dailyActions = extractPrimaryAction(daily?.actions, []);
     const mtdSpend = num(mtd?.spend);
     const dailySpend = num(daily?.spend);
+
+    const creative = parseCreative(a.creative);
 
     adRows.push({
       id: a.id,
@@ -518,6 +532,14 @@ async function refreshAdsForAdSet(
       cpc: num(mtd?.cpc),
       cpm: num(mtd?.cpm),
       ctr: num(mtd?.ctr),
+      creative_id: creative.id,
+      destination_url: creative.destination_url,
+      headline: creative.headline,
+      body: creative.body,
+      thumbnail_url: creative.thumbnail_url,
+      image_url: creative.image_url,
+      call_to_action: creative.call_to_action,
+      creative_raw: a.creative ?? null,
       last_refreshed_at: now,
       updated_at: now,
     });
@@ -527,6 +549,87 @@ async function refreshAdsForAdSet(
     const { error } = await service.from('ads').upsert(adRows, { onConflict: 'id' });
     if (error) throw new Error(`ads upsert: ${error.message}`);
   }
+}
+
+/** Pull the user-meaningful bits out of a Meta creative object — destination
+ * URL, headline, body, image/thumbnail, call-to-action. Tolerant of the
+ * many creative shapes (link ads, video ads, carousels, dynamic creative). */
+function parseCreative(c: Record<string, any> | undefined | null): {
+  id: string | null;
+  destination_url: string | null;
+  headline: string | null;
+  body: string | null;
+  thumbnail_url: string | null;
+  image_url: string | null;
+  call_to_action: string | null;
+} {
+  if (!c) {
+    return {
+      id: null,
+      destination_url: null,
+      headline: null,
+      body: null,
+      thumbnail_url: null,
+      image_url: null,
+      call_to_action: null,
+    };
+  }
+
+  const oss = c.object_story_spec ?? {};
+  const linkData = oss.link_data ?? null;
+  const videoData = oss.video_data ?? null;
+  const photoData = oss.photo_data ?? null;
+  const firstChild = linkData?.child_attachments?.[0] ?? null;
+  const afs = c.asset_feed_spec ?? null;
+
+  // Destination URL: link_data.link → CTA target → carousel first child → video CTA.
+  const destination_url =
+    linkData?.link ??
+    linkData?.call_to_action?.value?.link ??
+    firstChild?.link ??
+    videoData?.call_to_action?.value?.link ??
+    afs?.link_urls?.[0]?.website_url ??
+    null;
+
+  // Headline: link_data.name → carousel child → video title → asset feed.
+  const headline =
+    linkData?.name ??
+    firstChild?.name ??
+    videoData?.title ??
+    afs?.titles?.[0]?.text ??
+    null;
+
+  // Body: link_data.message → carousel child description → video message → asset feed.
+  const body =
+    linkData?.message ??
+    firstChild?.description ??
+    videoData?.message ??
+    afs?.bodies?.[0]?.text ??
+    null;
+
+  const thumbnail_url = c.thumbnail_url ?? null;
+  const image_url =
+    c.image_url ??
+    photoData?.image_hash ??
+    afs?.images?.[0]?.url ??
+    null;
+
+  const call_to_action =
+    linkData?.call_to_action?.type ??
+    videoData?.call_to_action?.type ??
+    c.call_to_action_type ??
+    afs?.call_to_action_types?.[0] ??
+    null;
+
+  return {
+    id: (c.id as string) ?? null,
+    destination_url,
+    headline,
+    body,
+    thumbnail_url,
+    image_url,
+    call_to_action,
+  };
 }
 
 /** Format a Meta Graph API error response into something human-readable.

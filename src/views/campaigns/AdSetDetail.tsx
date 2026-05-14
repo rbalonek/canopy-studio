@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../../auth/supabaseClient';
 import { Status } from '../../components/Status';
 import { useWorkspace } from '../../workspace/WorkspaceProvider';
@@ -40,6 +40,7 @@ export function AdSetDetail() {
     adSetId: string;
   }>();
   const workspace = useWorkspace();
+  const navigate = useNavigate();
   const [adSet, setAdSet] = useState<AdSet | null | undefined>(undefined);
   const [ads, setAds] = useState<AdRow[] | null>(null);
   const [clientName, setClientName] = useState('');
@@ -159,12 +160,17 @@ export function AdSetDetail() {
         <Stat label="Yesterday spend" value={`$${fmt(adSet.daily_spend)}`} />
       </div>
 
-      <AdsTable ads={ads} />
+      <AdsTable
+        ads={ads}
+        onOpen={(adId) =>
+          navigate(`${prefix}/clients/${clientId}/campaigns/${campaignId}/adsets/${adSetId}/ads/${adId}`)
+        }
+      />
     </div>
   );
 }
 
-function AdsTable({ ads }: { ads: AdRow[] | null }) {
+function AdsTable({ ads, onOpen }: { ads: AdRow[] | null; onOpen: (id: string) => void }) {
   if (ads === null) return <div className="meta">Loading ads…</div>;
   if (ads.length === 0) {
     return (
@@ -201,7 +207,7 @@ function AdsTable({ ads }: { ads: AdRow[] | null }) {
           </thead>
           <tbody>
             {ads.map((a) => (
-              <tr key={a.id}>
+              <tr key={a.id} onClick={() => onOpen(a.id)} style={{ cursor: 'pointer' }}>
                 <td style={{ fontWeight: 500 }}>{a.name}</td>
                 <td>
                   <Status s={mapStatus(a.status)} />
