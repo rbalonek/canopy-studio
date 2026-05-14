@@ -27,6 +27,8 @@ export type Client = {
   complete: number;
   parent?: boolean;
   locations?: Location[];
+  /** Client's primary website URL. Used as the seed for scraping/brand intel. */
+  website?: string | null;
 };
 
 export type CampaignStatus = 'Active' | 'Paused' | 'Draft' | 'Approved' | 'Scheduled' | 'Published' | 'Error';

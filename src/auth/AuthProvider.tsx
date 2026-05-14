@@ -32,9 +32,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setState({ session: null, user: null, loading: false });
       return;
     }
-    supabase.auth.getSession().then(({ data }) => {
-      setState({ session: data.session, user: data.session?.user ?? null, loading: false });
-    });
+    // Validate the cached session against the server. getSession() reads
+    // localStorage and trusts it; getUser() actually verifies the JWT.
+    // If the underlying user no longer exists (e.g. local DB was reset
+    // since the token was issued) we clear the stale session so the user
+    // sees Login instead of silently failing every RLS check.
+    (async () => {
+      const { data: sessionData } = await supabase!.auth.getSession();
+      if (!sessionData.session) {
+        setState({ session: null, user: null, loading: false });
+        return;
+      }
+      const { data: userData, error } = await supabase!.auth.getUser();
+      if (error || !userData.user) {
+        await supabase!.auth.signOut();
+        setState({ session: null, user: null, loading: false });
+        return;
+      }
+      setState({ session: sessionData.session, user: userData.user, loading: false });
+    })();
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       setState({ session, user: session?.user ?? null, loading: false });
     });

@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { supabase } from '../auth/supabaseClient';
-import type { Industry, WorkspaceMode } from '../data/types';
+import type { WorkspaceMode } from '../data/types';
 
 /**
  * Live onboarding wizard. Same visual structure as the /dev/onboard
@@ -14,16 +14,10 @@ import type { Industry, WorkspaceMode } from '../data/types';
  */
 const STEPS = ['Welcome', 'Workspace', 'First client', 'Done'] as const;
 
-const INDUSTRIES: Industry[] = [
-  'Dental / Healthcare',
-  'Fitness / Wellness',
-  'Automotive',
-  'Retail / E-commerce',
-  'Food & Beverage',
-  'Professional Services',
-  'Optometry',
-  'Home Services',
-];
+// Industry isn't asked during onboarding — it'll be auto-inferred from the
+// scraped website later. Default everyone to Professional Services until
+// the scraper ports over from ad-optimizer / Swimm-Copywriting-API.
+const DEFAULT_INDUSTRY = 'Professional Services';
 
 export function LiveOnboard() {
   const auth = useAuth();
@@ -33,7 +27,8 @@ export function LiveOnboard() {
   const [mode, setMode] = useState<WorkspaceMode>('agency');
   const [workspaceName, setWorkspaceName] = useState('');
   const [clientName, setClientName] = useState('');
-  const [clientIndustry, setClientIndustry] = useState<Industry>('Professional Services');
+  const [clientWebsite, setClientWebsite] = useState('');
+  const [hasMultipleLocations, setHasMultipleLocations] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,9 +75,10 @@ export function LiveOnboard() {
       const { error: cErr } = await supabase.from('clients').insert({
         id: clientId,
         name: clientName.trim(),
-        industry: clientIndustry,
+        industry: DEFAULT_INDUSTRY,
         complete: 0,
-        is_parent: false,
+        is_parent: hasMultipleLocations,
+        website: clientWebsite.trim() || null,
         workspace_id: ws.id,
       });
       if (cErr) {
@@ -132,9 +128,11 @@ export function LiveOnboard() {
           {step === 3 && (
             <ClientStep
               name={clientName}
-              industry={clientIndustry}
+              website={clientWebsite}
+              hasMultipleLocations={hasMultipleLocations}
               onName={setClientName}
-              onIndustry={setClientIndustry}
+              onWebsite={setClientWebsite}
+              onHasMultipleLocations={setHasMultipleLocations}
               onBack={() => setStep(2)}
               onNext={() => setStep(4)}
             />
@@ -307,16 +305,20 @@ function WorkspaceStep({
 
 function ClientStep({
   name,
-  industry,
+  website,
+  hasMultipleLocations,
   onName,
-  onIndustry,
+  onWebsite,
+  onHasMultipleLocations,
   onBack,
   onNext,
 }: {
   name: string;
-  industry: Industry;
+  website: string;
+  hasMultipleLocations: boolean;
   onName: (n: string) => void;
-  onIndustry: (i: Industry) => void;
+  onWebsite: (w: string) => void;
+  onHasMultipleLocations: (b: boolean) => void;
   onBack: () => void;
   onNext: () => void;
 }) {
@@ -326,32 +328,38 @@ function ClientStep({
       <div className="meta">
         Optional — you can add clients later from the dashboard. Skip if you'd rather start empty.
       </div>
-      <div className="grid grid-2 gap-16">
-        <label className="stack gap-4">
-          <span className="meta">Client name</span>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => onName(e.target.value)}
-            placeholder="Acme Dental"
-            style={inputStyle}
-          />
-        </label>
-        <label className="stack gap-4">
-          <span className="meta">Industry</span>
-          <select
-            value={industry}
-            onChange={(e) => onIndustry(e.target.value as Industry)}
-            style={inputStyle}
-          >
-            {INDUSTRIES.map((i) => (
-              <option key={i} value={i}>
-                {i}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+      <label className="stack gap-4">
+        <span className="meta">Client name</span>
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => onName(e.target.value)}
+          placeholder="Acme Dental"
+          style={inputStyle}
+        />
+      </label>
+      <label className="stack gap-4">
+        <span className="meta">Website URL</span>
+        <input
+          type="url"
+          value={website}
+          onChange={(e) => onWebsite(e.target.value)}
+          placeholder="https://acmedental.com"
+          style={inputStyle}
+        />
+        <span className="meta" style={{ fontSize: 11 }}>
+          We'll scrape this to auto-fill brand info and discover pages (scraper integration coming
+          next).
+        </span>
+      </label>
+      <label className="row gap-8">
+        <input
+          type="checkbox"
+          checked={hasMultipleLocations}
+          onChange={(e) => onHasMultipleLocations(e.target.checked)}
+        />
+        <span style={{ fontSize: 13 }}>Has multiple locations</span>
+      </label>
       <div className="row between">
         <button className="btn ghost" onClick={onBack}>
           ← Back
