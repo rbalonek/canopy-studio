@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { supabase } from '../../auth/supabaseClient';
 import { Icon } from '../../components/Icon';
 import { useQuery } from '../../data/context';
 import type { ClientHeader } from '../../data/types';
@@ -38,6 +39,36 @@ export function ClientDetail() {
 
   const [tab, setTab] = useState<TabId>('overview');
   const tabs: TabId[] = state.mode === 'agency' ? [...BASE_TABS, 'locations'] : BASE_TABS;
+
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshMsg, setRefreshMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+
+  async function onRefreshMeta() {
+    if (!supabase) {
+      setRefreshMsg({ kind: 'err', text: 'Supabase not configured' });
+      return;
+    }
+    setRefreshing(true);
+    setRefreshMsg(null);
+    const { data, error } = await supabase.functions.invoke('meta-refresh-client', {
+      body: { client_id: clientId },
+    });
+    setRefreshing(false);
+    if (error) {
+      setRefreshMsg({ kind: 'err', text: error.message });
+      return;
+    }
+    if (!data?.ok) {
+      setRefreshMsg({ kind: 'err', text: data?.error ?? 'Refresh failed' });
+      return;
+    }
+    setRefreshMsg({
+      kind: 'ok',
+      text: `Refreshed ${data.refreshed ?? 0} campaigns${
+        data.errors?.length ? ` (${data.errors.length} errored)` : ''
+      }.`,
+    });
+  }
 
   if (loading) {
     return (
@@ -102,8 +133,9 @@ export function ClientDetail() {
           </div>
         </div>
         <div className="row gap-8">
-          <button className="btn ghost">
-            <Icon name="refresh" size={14} /> Refresh META
+          <button className="btn ghost" onClick={onRefreshMeta} disabled={refreshing}>
+            <Icon name="refresh" size={14} />
+            {refreshing ? ' Refreshing…' : ' Refresh META'}
           </button>
           <button className="btn ai">
             <Icon name="sparkles" size={14} /> AI analyze
@@ -113,6 +145,19 @@ export function ClientDetail() {
           </button>
         </div>
       </div>
+      {refreshMsg && (
+        <div
+          className="meta"
+          style={{
+            marginBottom: 12,
+            color: refreshMsg.kind === 'err' ? 'var(--danger, #c33)' : 'var(--accent)',
+            fontSize: 12,
+          }}
+        >
+          {refreshMsg.kind === 'err' ? '⚠ ' : '✓ '}
+          {refreshMsg.text}
+        </div>
+      )}
 
       <div className="tabs" style={{ marginBottom: 20 }}>
         {tabs.map((t) => (
