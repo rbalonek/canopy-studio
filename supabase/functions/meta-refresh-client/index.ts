@@ -344,7 +344,173 @@ async function refreshFromMeta(
     if (upsertErr) return { ok: false, error: `Upsert failed: ${upsertErr.message}` };
   }
 
+  // For each campaign, pull ad sets, then for each ad set pull ads.
+  for (const c of campaigns) {
+    try {
+      await refreshAdSetsForCampaign(c.id, clientId, acct, accessToken, service);
+    } catch (e) {
+      errors.push(`ad_sets for ${c.id}: ${(e as Error).message}`);
+    }
+  }
+
   return { ok: true, refreshed: rows.length, errors: errors.length ? errors : undefined, at: now };
+}
+
+async function refreshAdSetsForCampaign(
+  campaignId: string,
+  clientId: string,
+  adAccountId: string,
+  accessToken: string,
+  service: ReturnType<typeof createClient>,
+): Promise<void> {
+  const url = new URL(`${META_GRAPH}/${campaignId}/adsets`);
+  url.searchParams.set('fields', 'id,name,status,optimization_goal');
+  url.searchParams.set('access_token', accessToken);
+  url.searchParams.set('limit', '100');
+
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`/adsets ${res.status}: ${await res.text()}`);
+  const adSets = ((await res.json()).data ?? []) as Array<{
+    id: string;
+    name: string;
+    status: string;
+    optimization_goal?: string;
+  }>;
+
+  const now = new Date().toISOString();
+  const adSetRows: Array<Record<string, unknown>> = [];
+
+  for (const a of adSets) {
+    const [mtd, daily] = await Promise.all([
+      getNodeInsights(a.id, 'this_month', accessToken),
+      getNodeInsights(a.id, 'yesterday', accessToken),
+    ]);
+    const mtdActions = extractPrimaryAction(mtd?.actions, []);
+    const dailyActions = extractPrimaryAction(daily?.actions, []);
+    const mtdSpend = num(mtd?.spend);
+    const dailySpend = num(daily?.spend);
+
+    adSetRows.push({
+      id: a.id,
+      campaign_id: campaignId,
+      client_id: clientId,
+      ad_account_id: adAccountId,
+      name: a.name,
+      status: a.status,
+      optimization_goal: a.optimization_goal ?? null,
+      daily_spend: dailySpend,
+      mtd_spend: mtdSpend,
+      daily_results: dailyActions.count,
+      daily_result_type: dailyActions.type,
+      daily_cost_per_result: dailyActions.count > 0 ? dailySpend / dailyActions.count : 0,
+      mtd_results: mtdActions.count,
+      mtd_result_type: mtdActions.type,
+      mtd_cost_per_result: mtdActions.count > 0 ? mtdSpend / mtdActions.count : 0,
+      all_daily_actions: dailyActions.all,
+      all_mtd_actions: mtdActions.all,
+      impressions: num(mtd?.impressions),
+      clicks: num(mtd?.clicks),
+      cpc: num(mtd?.cpc),
+      cpm: num(mtd?.cpm),
+      ctr: num(mtd?.ctr),
+      last_refreshed_at: now,
+      updated_at: now,
+    });
+
+    // Ads under this ad set
+    await refreshAdsForAdSet(a.id, campaignId, clientId, adAccountId, accessToken, service);
+  }
+
+  if (adSetRows.length > 0) {
+    const { error } = await service.from('ad_sets').upsert(adSetRows, { onConflict: 'id' });
+    if (error) throw new Error(`ad_sets upsert: ${error.message}`);
+  }
+}
+
+async function refreshAdsForAdSet(
+  adSetId: string,
+  campaignId: string,
+  clientId: string,
+  adAccountId: string,
+  accessToken: string,
+  service: ReturnType<typeof createClient>,
+): Promise<void> {
+  const url = new URL(`${META_GRAPH}/${adSetId}/ads`);
+  url.searchParams.set('fields', 'id,name,status');
+  url.searchParams.set('access_token', accessToken);
+  url.searchParams.set('limit', '100');
+
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`/ads ${res.status}: ${await res.text()}`);
+  const ads = ((await res.json()).data ?? []) as Array<{
+    id: string;
+    name: string;
+    status: string;
+  }>;
+
+  const now = new Date().toISOString();
+  const adRows: Array<Record<string, unknown>> = [];
+
+  for (const a of ads) {
+    const [mtd, daily] = await Promise.all([
+      getNodeInsights(a.id, 'this_month', accessToken),
+      getNodeInsights(a.id, 'yesterday', accessToken),
+    ]);
+    const mtdActions = extractPrimaryAction(mtd?.actions, []);
+    const dailyActions = extractPrimaryAction(daily?.actions, []);
+    const mtdSpend = num(mtd?.spend);
+    const dailySpend = num(daily?.spend);
+
+    adRows.push({
+      id: a.id,
+      ad_set_id: adSetId,
+      campaign_id: campaignId,
+      client_id: clientId,
+      ad_account_id: adAccountId,
+      name: a.name,
+      status: a.status,
+      daily_spend: dailySpend,
+      mtd_spend: mtdSpend,
+      daily_results: dailyActions.count,
+      daily_result_type: dailyActions.type,
+      daily_cost_per_result: dailyActions.count > 0 ? dailySpend / dailyActions.count : 0,
+      mtd_results: mtdActions.count,
+      mtd_result_type: mtdActions.type,
+      mtd_cost_per_result: mtdActions.count > 0 ? mtdSpend / mtdActions.count : 0,
+      all_daily_actions: dailyActions.all,
+      all_mtd_actions: mtdActions.all,
+      impressions: num(mtd?.impressions),
+      clicks: num(mtd?.clicks),
+      cpc: num(mtd?.cpc),
+      cpm: num(mtd?.cpm),
+      ctr: num(mtd?.ctr),
+      last_refreshed_at: now,
+      updated_at: now,
+    });
+  }
+
+  if (adRows.length > 0) {
+    const { error } = await service.from('ads').upsert(adRows, { onConflict: 'id' });
+    if (error) throw new Error(`ads upsert: ${error.message}`);
+  }
+}
+
+async function getNodeInsights(
+  nodeId: string,
+  datePreset: string,
+  accessToken: string,
+): Promise<Record<string, any> | null> {
+  const url = new URL(`${META_GRAPH}/${nodeId}/insights`);
+  url.searchParams.set(
+    'fields',
+    ['spend', 'impressions', 'clicks', 'actions', 'cpc', 'cpm', 'ctr'].join(','),
+  );
+  url.searchParams.set('date_preset', datePreset);
+  url.searchParams.set('access_token', accessToken);
+  const res = await fetch(url);
+  if (!res.ok) return null; // tolerate per-node failures so one bad ad doesn't kill the batch
+  const j = await res.json();
+  return (j.data?.[0] ?? null) as Record<string, any> | null;
 }
 
 async function getInsights(campaignId: string, datePreset: string, accessToken: string) {

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../auth/supabaseClient';
 import { Status } from '../../components/Status';
+import { useWorkspace } from '../../workspace/WorkspaceProvider';
 
 /**
  * Live campaigns table — reads from the `campaigns` table that
@@ -10,6 +12,7 @@ import { Status } from '../../components/Status';
  */
 type Row = {
   id: string;
+  client_id: string;
   name: string;
   status: string;
   strategy: string | null;
@@ -29,6 +32,8 @@ type Props =
 export function CampaignsTable(props: Props) {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const navigate = useNavigate();
+  const workspace = useWorkspace();
 
   useEffect(() => {
     if (!supabase) {
@@ -38,7 +43,7 @@ export function CampaignsTable(props: Props) {
     let query = supabase
       .from('campaigns')
       .select(
-        'id, name, status, strategy, ad_account_id, daily_spend, mtd_spend, mtd_results, mtd_result_type, mtd_cost_per_result, last_refreshed_at',
+        'id, client_id, name, status, strategy, ad_account_id, daily_spend, mtd_spend, mtd_results, mtd_result_type, mtd_cost_per_result, last_refreshed_at',
       )
       .order('mtd_spend', { ascending: false });
     if ('clientId' in props && props.clientId) {
@@ -125,9 +130,13 @@ export function CampaignsTable(props: Props) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
-              <tr key={r.id}>
-                <td>
+            {rows.map((r) => {
+              const prefix = workspace ? `/app/${workspace.slug}` : '/dev';
+              const openCampaign = () =>
+                navigate(`${prefix}/clients/${r.client_id}/campaigns/${r.id}`);
+              return (
+                <tr key={r.id} onClick={openCampaign} style={{ cursor: 'pointer' }}>
+                  <td>
                   <div className="stack gap-2">
                     <span style={{ fontWeight: 500 }}>{r.name}</span>
                     {r.ad_account_id && (
@@ -158,8 +167,9 @@ export function CampaignsTable(props: Props) {
                 <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                   ${fmt(r.daily_spend)}
                 </td>
-              </tr>
-            ))}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
