@@ -42,6 +42,10 @@ export function LocationsTab({ clientId, parentName }: Props) {
   const workspace = useWorkspace();
   const navigate = useNavigate();
   const [locations, setLocations] = useState<Location[] | null>(null);
+  // Per-ad_account aggregates from live campaigns. Keyed by ad_account_id.
+  const [aggsByAccount, setAggsByAccount] = useState<
+    Record<string, { mtdSpend: number; activeCampaigns: number }>
+  >({});
   // null = closed; 'new' = adding; <id> = editing that location
   const [formState, setFormState] = useState<'new' | string | null>(null);
 
@@ -82,6 +86,29 @@ export function LocationsTab({ clientId, parentName }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
 
+  // Pull all campaigns for this client and bucket aggregates by
+  // ad_account_id, so each location card can show its real spend +
+  // active campaign count instead of the placeholder $0/0.
+  useEffect(() => {
+    if (!supabase) return;
+    supabase
+      .from('campaigns')
+      .select('ad_account_id, status, mtd_spend')
+      .eq('client_id', clientId)
+      .then(({ data }) => {
+        const map: Record<string, { mtdSpend: number; activeCampaigns: number }> = {};
+        for (const r of data ?? []) {
+          const acct = (r.ad_account_id as string | null) ?? '';
+          if (!acct) continue;
+          const agg = map[acct] ?? { mtdSpend: 0, activeCampaigns: 0 };
+          agg.mtdSpend += parseFloat(String(r.mtd_spend ?? 0)) || 0;
+          if (r.status === 'ACTIVE') agg.activeCampaigns += 1;
+          map[acct] = agg;
+        }
+        setAggsByAccount(map);
+      });
+  }, [clientId, locations?.length]);
+
   async function onDelete(loc: Location) {
     if (!supabase) return;
     if (!confirm(`Delete location "${loc.name}"? This can't be undone.`)) return;
@@ -117,6 +144,7 @@ export function LocationsTab({ clientId, parentName }: Props) {
             key={l.id}
             location={l}
             parentName={parentName}
+            liveAggs={l.adAccountId ? aggsByAccount[l.adAccountId] : undefined}
             onOpen={() => openLocation(l)}
             onEdit={() => setFormState(l.id)}
             onDelete={() => onDelete(l)}
@@ -162,16 +190,27 @@ export function LocationsTab({ clientId, parentName }: Props) {
 function LocationCard({
   location: l,
   parentName,
+  liveAggs,
   onOpen,
   onEdit,
   onDelete,
 }: {
   location: Location;
   parentName: string;
+  liveAggs?: { mtdSpend: number; activeCampaigns: number };
   onOpen: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  // Prefer live aggregates from the campaigns table when we have them;
+  // fall back to whatever's on the locations row.
+  const mtdLabel = liveAggs
+    ? `$${liveAggs.mtdSpend.toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}`
+    : l.mtdSpend;
+  const campaignsLabel = liveAggs ? liveAggs.activeCampaigns : l.activeCampaigns;
   return (
     <div className="card card-pad stack gap-10">
       <div className="row between">
@@ -189,11 +228,11 @@ function LocationCard({
       <div className="row gap-16" style={{ paddingTop: 4 }}>
         <div className="stack">
           <span className="meta">Spend MTD</span>
-          <span style={{ fontWeight: 500 }}>{l.mtdSpend}</span>
+          <span style={{ fontWeight: 500 }}>{mtdLabel}</span>
         </div>
         <div className="stack">
           <span className="meta">Campaigns</span>
-          <span style={{ fontWeight: 500 }}>{l.activeCampaigns}</span>
+          <span style={{ fontWeight: 500 }}>{campaignsLabel}</span>
         </div>
         <div className="stack">
           <span className="meta">Posts/wk</span>

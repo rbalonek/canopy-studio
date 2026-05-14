@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '../auth/supabaseClient';
 import { EntityCard } from '../components/EntityCard';
 import { Icon } from '../components/Icon';
 import { useQuery } from '../data/context';
@@ -20,9 +21,52 @@ export function Clients() {
 
   const { data: cards } = useQuery<ClientCard[]>((p) => p.listClientCards());
   const [layout, setLayout] = useState<Layout>('grid');
-  const multiLocationCount = cards?.filter((c) => c.parent).length ?? 0;
   const shellPrefix = workspace ? `/app/${workspace.slug}` : '/dev';
   const goToClient = (id: string) => navigate(`${shellPrefix}/clients/${id}`);
+
+  // Aggregate live campaign data per client_id so the cards show real
+  // Spend MTD + active campaign count instead of the mock placeholders.
+  const [liveByClient, setLiveByClient] = useState<
+    Record<string, { mtdSpend: number; activeCampaigns: number }>
+  >({});
+  useEffect(() => {
+    if (!supabase || !workspace) return;
+    supabase
+      .from('campaigns')
+      .select('client_id, status, mtd_spend')
+      .then(({ data }) => {
+        const map: Record<string, { mtdSpend: number; activeCampaigns: number }> = {};
+        for (const r of data ?? []) {
+          const cid = r.client_id as string;
+          const agg = map[cid] ?? { mtdSpend: 0, activeCampaigns: 0 };
+          agg.mtdSpend += parseFloat(String(r.mtd_spend ?? 0)) || 0;
+          if (r.status === 'ACTIVE') agg.activeCampaigns += 1;
+          map[cid] = agg;
+        }
+        setLiveByClient(map);
+      });
+  }, [workspace?.id, cards?.length]);
+
+  // Merge live aggregates over the mock placeholder fields when we have
+  // them. Falls back to whatever's in the ClientCard row otherwise.
+  const enrichedCards = useMemo(() => {
+    if (!cards) return cards;
+    if (!workspace) return cards;
+    return cards.map((c) => {
+      const live = liveByClient[c.id];
+      if (!live) return c;
+      return {
+        ...c,
+        mtdSpend: `$${live.mtdSpend.toLocaleString(undefined, {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}`,
+        activeCampaigns: live.activeCampaigns,
+      };
+    });
+  }, [cards, liveByClient, workspace]);
+
+  const multiLocationCount = enrichedCards?.filter((c) => c.parent).length ?? 0;
 
   return (
     <div className="content wide">
@@ -62,7 +106,7 @@ export function Clients() {
 
       {layout === 'grid' ? (
         <div className="grid grid-3 gap-16" style={{ gap: 16 }}>
-          {cards?.map((c) => (
+          {enrichedCards?.map((c) => (
             <EntityCard
               key={c.id}
               name={c.name}
@@ -89,7 +133,7 @@ export function Clients() {
               </tr>
             </thead>
             <tbody>
-              {cards?.map((c) => (
+              {enrichedCards?.map((c) => (
                 <tr
                   key={c.id}
                   onClick={() => goToClient(c.id)}

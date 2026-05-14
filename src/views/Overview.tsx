@@ -23,13 +23,21 @@ type LiveAgg = {
 
 type CampaignRow = {
   client_id: string;
+  ad_account_id: string | null;
   status: string | null;
   mtd_spend: number;
   mtd_results: number;
   roas: number;
 };
 
-type Scope = 'all' | `ind:${string}` | `one:${string}`;
+type LocationLite = {
+  id: string;
+  name: string;
+  client_id: string;
+  ad_account_id: string | null;
+};
+
+type Scope = 'all' | `ind:${string}` | `one:${string}` | `loc:${string}`;
 
 const PALETTE = ['var(--accent)', 'var(--ai)', '#F59E0B', '#EF4444', '#10B981'];
 const PERIODS = ['Today', '7d', 'MTD', '30d', '90d', 'Custom'] as const;
@@ -55,22 +63,43 @@ export function Overview() {
 
   // Pull live campaigns (workspace-scoped via RLS). We keep the raw rows
   // so we can re-aggregate when the user filters by scope (industry /
-  // single client) without re-querying.
+  // single client / single location) without re-querying.
   const [campaignRows, setCampaignRows] = useState<CampaignRow[] | null>(null);
   useEffect(() => {
     if (!supabase || !workspace) return;
     supabase
       .from('campaigns')
-      .select('client_id, status, mtd_spend, mtd_results, roas')
+      .select('client_id, ad_account_id, status, mtd_spend, mtd_results, roas')
       .then(({ data }) => {
         const rows = (data ?? []).map((r) => ({
           client_id: r.client_id as string,
+          ad_account_id: (r.ad_account_id as string | null) ?? null,
           status: (r.status as string | null) ?? null,
           mtd_spend: parseFloat(String(r.mtd_spend ?? 0)) || 0,
           mtd_results: parseFloat(String(r.mtd_results ?? 0)) || 0,
           roas: parseFloat(String(r.roas ?? 0)) || 0,
         }));
         setCampaignRows(rows);
+      });
+  }, [workspace?.id]);
+
+  // Pull locations so the picker can offer sub-location selection for
+  // multi-location clients (Big Air → Big Air - Burnsville, …).
+  const [locations, setLocations] = useState<LocationLite[] | null>(null);
+  useEffect(() => {
+    if (!supabase || !workspace) return;
+    supabase
+      .from('locations')
+      .select('id, name, client_id, ad_account_id')
+      .then(({ data }) => {
+        setLocations(
+          (data ?? []).map((r) => ({
+            id: r.id as string,
+            name: r.name as string,
+            client_id: r.client_id as string,
+            ad_account_id: (r.ad_account_id as string | null) ?? null,
+          })),
+        );
       });
   }, [workspace?.id]);
 
@@ -111,13 +140,18 @@ export function Overview() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [perf, scope, clients]);
 
-  // Re-aggregate live campaigns whenever scope (all / industry / one client)
-  // changes. Filtering is done against the saved clients list — campaign
-  // rows carry client_id, we look up the client to test industry/name.
+  // Re-aggregate live campaigns whenever scope (all / industry / one client /
+  // one location) changes. Location scope filters by ad_account_id since
+  // each location is its own ad account.
   const live: LiveAgg | null = useMemo(() => {
     if (!campaignRows) return null;
     const scoped = campaignRows.filter((r) => {
       if (scope === 'all') return true;
+      if (scope.startsWith('loc:')) {
+        const locId = scope.slice(4);
+        const loc = locations?.find((l) => l.id === locId);
+        return !!loc?.ad_account_id && r.ad_account_id === loc.ad_account_id;
+      }
       const cl = clients?.find((c) => c.id === r.client_id);
       if (!cl) return false;
       if (scope.startsWith('ind:')) return cl.industry === scope.slice(4);
@@ -131,7 +165,7 @@ export function Overview() {
     const activeCampaigns = scoped.filter((r) => r.status === 'ACTIVE').length;
     const costPerResult = totalResults > 0 ? totalSpend / totalResults : 0;
     return { totalSpend, totalResults, activeCampaigns, avgRoas, costPerResult };
-  }, [campaignRows, scope, clients]);
+  }, [campaignRows, scope, clients, locations]);
 
   // Prefer live campaign aggregates when available (workspace context),
   // fall back to the mock-perf math for /dev showcase rendering.
@@ -193,8 +227,10 @@ export function Overview() {
         ? 'All clients'
         : 'All locations'
       : scope.startsWith('ind:')
-      ? scope.slice(4)
-      : scope.slice(4);
+        ? scope.slice(4)
+        : scope.startsWith('loc:')
+          ? locations?.find((l) => l.id === scope.slice(4))?.name ?? scope.slice(4)
+          : scope.slice(4);
 
   const totalClients = clients?.length ?? 0;
 
@@ -278,19 +314,46 @@ export function Overview() {
                     state.mode === 'agency' ? 'Clients' : 'Locations'
                   } page first.`}
             </span>
-            <div className="row gap-6" style={{ flexWrap: 'wrap' }}>
+            <div className="stack gap-8">
               {clients?.map((c) => {
-                const active = scope === `one:${c.name}`;
+                const clientActive = scope === `one:${c.name}`;
+                const clientLocs = locations?.filter((l) => l.client_id === c.id) ?? [];
                 return (
-                  <button
-                    key={c.id}
-                    onClick={() => setScope(`one:${c.name}`)}
-                    className={`pill ${active ? 'teal' : ''}`}
-                    style={{ border: 0, cursor: 'pointer', font: 'inherit' }}
-                  >
-                    {active && <span className="dot" />}
-                    {c.name}
-                  </button>
+                  <div key={c.id} className="row gap-6" style={{ flexWrap: 'wrap' }}>
+                    <button
+                      onClick={() => setScope(`one:${c.name}`)}
+                      className={`pill ${clientActive ? 'teal' : ''}`}
+                      style={{ border: 0, cursor: 'pointer', font: 'inherit' }}
+                    >
+                      {clientActive && <span className="dot" />}
+                      {c.name}
+                    </button>
+                    {clientLocs.map((l) => {
+                      const active = scope === `loc:${l.id}`;
+                      return (
+                        <button
+                          key={l.id}
+                          onClick={() => setScope(`loc:${l.id}`)}
+                          className={`pill ${active ? 'teal' : ''}`}
+                          style={{
+                            border: 0,
+                            cursor: 'pointer',
+                            font: 'inherit',
+                            opacity: l.ad_account_id ? 1 : 0.5,
+                          }}
+                          title={
+                            l.ad_account_id
+                              ? undefined
+                              : 'No ad account set on this location yet — campaign filter unavailable'
+                          }
+                          disabled={!l.ad_account_id}
+                        >
+                          {active && <span className="dot" />}
+                          ↳ {l.name}
+                        </button>
+                      );
+                    })}
+                  </div>
                 );
               })}
             </div>
