@@ -59,14 +59,18 @@ export function ClientDetail() {
       return;
     }
     if (!data?.ok) {
-      setRefreshMsg({ kind: 'err', text: data?.error ?? 'Refresh failed' });
+      const detail = data?.errors?.length ? `: ${data.errors.join('; ')}` : '';
+      setRefreshMsg({
+        kind: 'err',
+        text: (data?.error ?? 'Refresh failed') + detail,
+      });
       return;
     }
     setRefreshMsg({
       kind: 'ok',
-      text: `Refreshed ${data.refreshed ?? 0} campaigns${
-        data.errors?.length ? ` (${data.errors.length} errored)` : ''
-      }.`,
+      text: `Refreshed ${data.refreshed ?? 0} campaigns across ${
+        data.attempted?.length ?? 1
+      } ad account(s).`,
     });
   }
 
@@ -124,11 +128,6 @@ export function ClientDetail() {
               <span>
                 {header.locationCount} {header.locationCount === 1 ? 'location' : 'locations'}
               </span>
-              {header.adAccountId && (
-                <>
-                  ·<span className="mono">{header.adAccountId}</span>
-                </>
-              )}
             </div>
           </div>
         </div>

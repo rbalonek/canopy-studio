@@ -39,12 +39,17 @@ const META_GRAPH = `https://graph.facebook.com/${META_API_VERSION}`;
 
 interface RefreshRequest {
   client_id: string;
+  /** Optional — refresh just this location's ad account instead of every
+   * location under the client. */
+  location_id?: string;
 }
 
 interface RefreshResult {
   ok: boolean;
   refreshed?: number;
   errors?: string[];
+  /** ad_account_ids that we actually attempted (sanitized form). */
+  attempted?: string[];
   at?: string;
   error?: string;
 }
@@ -119,17 +124,18 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Ad account resolution: prefer per-location ad_account_id values
-    // (multi-location agencies). Fall back to the single
-    // meta_accounts.account_id for clients that haven't split out
-    // locations yet.
-    const adAccountIds = await resolveAdAccountIds(serviceClient, body.client_id);
+    // Ad account resolution: per-location override or all locations.
+    const adAccountIds = await resolveAdAccountIds(
+      serviceClient,
+      body.client_id,
+      body.location_id ?? null,
+    );
     if (adAccountIds.length === 0) {
       return json(
         {
           ok: false,
           error:
-            'No Meta ad accounts configured for this client. Add ad_account_id on each location, or set one on the client\'s Ad Accounts tab.',
+            'No Meta ad accounts configured. Add an ad account ID on a location (Clients → client → Locations) or on the client\'s Ad Accounts tab.',
         },
         400,
       );
@@ -143,7 +149,10 @@ Deno.serve(async (req) => {
       serviceClient,
     );
 
-    return json(summary, summary.ok ? 200 : 502);
+    // Always return 200 from here; partial failures land in summary.errors
+    // so the UI can show what worked and what didn't. Only 4xx/5xx for
+    // setup errors (no token, no ad account, auth issues).
+    return json(summary, 200);
   } catch (e) {
     return json({ ok: false, error: (e as Error).message }, 500);
   }
@@ -172,15 +181,30 @@ async function resolveAccessToken(
 async function resolveAdAccountIds(
   service: ReturnType<typeof createClient>,
   clientId: string,
+  locationId: string | null,
 ): Promise<string[]> {
+  // If caller asked for a single location, only refresh that one's account.
+  if (locationId) {
+    const { data: loc } = await service
+      .from('locations')
+      .select('ad_account_id')
+      .eq('id', locationId)
+      .eq('client_id', clientId)
+      .maybeSingle();
+    const id = sanitizeAdAccountId(loc?.ad_account_id as string | null | undefined);
+    return id ? [id] : [];
+  }
+
+  // Otherwise: all locations with an ad_account_id, fall back to the
+  // legacy per-client meta_accounts.account_id.
   const { data: locs } = await service
     .from('locations')
     .select('ad_account_id')
     .eq('client_id', clientId)
     .not('ad_account_id', 'is', null);
   const fromLocations = (locs ?? [])
-    .map((l) => (l.ad_account_id as string | null) ?? '')
-    .filter(Boolean);
+    .map((l) => sanitizeAdAccountId(l.ad_account_id as string | null))
+    .filter((v): v is string => !!v);
   if (fromLocations.length > 0) return fromLocations;
 
   const { data: legacy } = await service
@@ -188,7 +212,17 @@ async function resolveAdAccountIds(
     .select('account_id')
     .eq('client_id', clientId)
     .maybeSingle();
-  return legacy?.account_id ? [legacy.account_id as string] : [];
+  const legacyId = sanitizeAdAccountId(legacy?.account_id as string | null | undefined);
+  return legacyId ? [legacyId] : [];
+}
+
+/** Normalize a user-entered ad account ID. Strips whitespace and ensures
+ * the `act_` prefix. Returns null for empty/invalid input. */
+function sanitizeAdAccountId(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const trimmed = String(raw).replace(/\s+/g, '');
+  if (!trimmed) return null;
+  return trimmed.startsWith('act_') ? trimmed : `act_${trimmed}`;
 }
 
 async function refreshAllAdAccounts(
@@ -209,9 +243,13 @@ async function refreshAllAdAccounts(
     if (r.errors) errors.push(...r.errors);
   }
   return {
-    ok: errors.length === 0 || total > 0,
+    // ok = at least one ad account refreshed cleanly, even if others errored.
+    // A 0-of-N result still returns 200 from the caller (so the UI can show
+    // the errors list); the boolean drives the success/error banner.
+    ok: errors.length === 0,
     refreshed: total,
     errors: errors.length ? errors : undefined,
+    attempted: adAccountIds,
     at: new Date().toISOString(),
   };
 }

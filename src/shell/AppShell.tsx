@@ -16,6 +16,7 @@ import { Reports } from '../views/Reports';
 import { Settings } from '../views/Settings';
 import { BrandIntelligence } from '../views/brand/BrandIntelligence';
 import { ClientDetail } from '../views/client-detail/ClientDetail';
+import { LocationDetail } from '../views/client-detail/LocationDetail';
 import { ROUTES, type RouteId } from '../routes';
 import { useAppState } from './AppState';
 import { Sidebar } from './Sidebar';
@@ -25,6 +26,7 @@ const VIEWS: Record<RouteId, () => JSX.Element> = {
   overview: () => <Overview />,
   clients: () => <Clients />,
   'client-detail': () => <ClientDetail />,
+  'location-detail': () => <LocationDetail />,
   'ad-perf': () => <AdPerf />,
   calendar: () => <Calendar />,
   'ad-studio': () => <AdStudio />,

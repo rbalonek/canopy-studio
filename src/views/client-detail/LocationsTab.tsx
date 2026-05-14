@@ -1,8 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../auth/supabaseClient';
 import { Icon } from '../../components/Icon';
 import { Ring } from '../../components/Ring';
 import type { Location } from '../../data/types';
+import { useWorkspace } from '../../workspace/WorkspaceProvider';
 
 type Props = {
   clientId: string;
@@ -10,8 +12,6 @@ type Props = {
 };
 
 function initialsFromLocationName(name: string): string {
-  // "Acme Dental — Downtown" → "Do". Falls back to first 2 chars of the
-  // whole name when there's no " — " separator.
   const parts = name.split('—');
   const tail = parts.length > 1 ? parts[parts.length - 1].trim() : name;
   return tail.slice(0, 2);
@@ -30,9 +30,20 @@ function randomSuffix(): string {
   return Math.random().toString(36).slice(2, 6);
 }
 
+/** Normalize an `act_…` ad account ID. Strips whitespace and ensures the
+ * prefix. Returns empty string for empty input. */
+function normalizeAdAccountId(raw: string): string {
+  const trimmed = raw.replace(/\s+/g, '');
+  if (!trimmed) return '';
+  return trimmed.startsWith('act_') ? trimmed : `act_${trimmed}`;
+}
+
 export function LocationsTab({ clientId, parentName }: Props) {
+  const workspace = useWorkspace();
+  const navigate = useNavigate();
   const [locations, setLocations] = useState<Location[] | null>(null);
-  const [adding, setAdding] = useState(false);
+  // null = closed; 'new' = adding; <id> = editing that location
+  const [formState, setFormState] = useState<'new' | string | null>(null);
 
   async function refresh() {
     if (!supabase) {
@@ -71,87 +82,55 @@ export function LocationsTab({ clientId, parentName }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
 
+  async function onDelete(loc: Location) {
+    if (!supabase) return;
+    if (!confirm(`Delete location "${loc.name}"? This can't be undone.`)) return;
+    await supabase.from('locations').delete().eq('id', loc.id);
+    refresh();
+  }
+
+  function openLocation(loc: Location) {
+    const prefix = workspace ? `/app/${workspace.slug}` : '/dev';
+    navigate(`${prefix}/clients/${clientId}/locations/${loc.id}`);
+  }
+
   if (locations === null) {
     return <div className="meta">Loading…</div>;
   }
 
   return (
     <div className="grid grid-3 gap-16" style={{ gap: 16 }}>
-      {locations.map((l) => (
-        <div key={l.id} className="card card-pad stack gap-10">
-          <div className="row between">
-            <div className="row gap-8">
-              <div className="logo-mark" style={{ width: 28, height: 28, fontSize: 12 }}>
-                {initialsFromLocationName(l.name)}
-              </div>
-              <div className="stack">
-                <span style={{ fontWeight: 500, fontSize: 13 }}>{l.name}</span>
-                <span className="meta">{l.address}</span>
-              </div>
-            </div>
-            <Ring p={l.complete} />
-          </div>
-          <div className="row gap-16" style={{ paddingTop: 4 }}>
-            <div className="stack">
-              <span className="meta">Spend MTD</span>
-              <span style={{ fontWeight: 500 }}>{l.mtdSpend}</span>
-            </div>
-            <div className="stack">
-              <span className="meta">Campaigns</span>
-              <span style={{ fontWeight: 500 }}>{l.activeCampaigns}</span>
-            </div>
-            <div className="stack">
-              <span className="meta">Posts/wk</span>
-              <span style={{ fontWeight: 500 }}>{l.postsPerWeek}</span>
-            </div>
-          </div>
-          {(l.pageId || l.instagramBusinessAccountId || l.adAccountId) && (
-            <div className="stack gap-2" style={{ paddingTop: 4 }}>
-              {l.adAccountId && (
-                <div className="row gap-6" style={{ fontSize: 11 }}>
-                  <span className="meta">Ad account</span>
-                  <span className="mono" style={{ color: 'var(--fg-2)' }}>
-                    {l.adAccountId}
-                  </span>
-                </div>
-              )}
-              {l.pageId && (
-                <div className="row gap-6" style={{ fontSize: 11 }}>
-                  <span className="meta">FB Page</span>
-                  <span className="mono" style={{ color: 'var(--fg-2)' }}>
-                    {l.pageId}
-                  </span>
-                </div>
-              )}
-              {l.instagramBusinessAccountId && (
-                <div className="row gap-6" style={{ fontSize: 11 }}>
-                  <span className="meta">IG Business</span>
-                  <span className="mono" style={{ color: 'var(--fg-2)' }}>
-                    {l.instagramBusinessAccountId}
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
-          <div
-            className="meta"
-            style={{ fontSize: 11, padding: '6px 8px', background: 'var(--bg-2)', borderRadius: 4 }}
-          >
-            ↳ Inherits brand rules from {parentName} (parent)
-          </div>
-          <div className="row gap-6">
-            <button className="btn sm">Open</button>
-            <button className="btn ghost sm">Edit brand overrides</button>
-          </div>
-        </div>
-      ))}
+      {locations.map((l) =>
+        formState === l.id ? (
+          <LocationForm
+            key={l.id}
+            clientId={clientId}
+            existing={l}
+            onCancel={() => setFormState(null)}
+            onSaved={() => {
+              setFormState(null);
+              refresh();
+            }}
+          />
+        ) : (
+          <LocationCard
+            key={l.id}
+            location={l}
+            parentName={parentName}
+            onOpen={() => openLocation(l)}
+            onEdit={() => setFormState(l.id)}
+            onDelete={() => onDelete(l)}
+          />
+        ),
+      )}
 
-      {adding ? (
-        <AddLocationForm
+      {formState === 'new' ? (
+        <LocationForm
           clientId={clientId}
-          onCancel={() => setAdding(false)}
-          onAdded={() => {
-            setAdding(false);
+          existing={null}
+          onCancel={() => setFormState(null)}
+          onSaved={() => {
+            setFormState(null);
             refresh();
           }}
         />
@@ -169,7 +148,7 @@ export function LocationsTab({ clientId, parentName }: Props) {
             color: 'inherit',
             font: 'inherit',
           }}
-          onClick={() => setAdding(true)}
+          onClick={() => setFormState('new')}
         >
           <Icon name="plus" size={24} />
           <span style={{ fontWeight: 500 }}>Add location</span>
@@ -180,20 +159,112 @@ export function LocationsTab({ clientId, parentName }: Props) {
   );
 }
 
-function AddLocationForm({
+function LocationCard({
+  location: l,
+  parentName,
+  onOpen,
+  onEdit,
+  onDelete,
+}: {
+  location: Location;
+  parentName: string;
+  onOpen: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="card card-pad stack gap-10">
+      <div className="row between">
+        <div className="row gap-8">
+          <div className="logo-mark" style={{ width: 28, height: 28, fontSize: 12 }}>
+            {initialsFromLocationName(l.name)}
+          </div>
+          <div className="stack">
+            <span style={{ fontWeight: 500, fontSize: 13 }}>{l.name}</span>
+            <span className="meta">{l.address}</span>
+          </div>
+        </div>
+        <Ring p={l.complete} />
+      </div>
+      <div className="row gap-16" style={{ paddingTop: 4 }}>
+        <div className="stack">
+          <span className="meta">Spend MTD</span>
+          <span style={{ fontWeight: 500 }}>{l.mtdSpend}</span>
+        </div>
+        <div className="stack">
+          <span className="meta">Campaigns</span>
+          <span style={{ fontWeight: 500 }}>{l.activeCampaigns}</span>
+        </div>
+        <div className="stack">
+          <span className="meta">Posts/wk</span>
+          <span style={{ fontWeight: 500 }}>{l.postsPerWeek}</span>
+        </div>
+      </div>
+      {(l.pageId || l.instagramBusinessAccountId || l.adAccountId) && (
+        <div className="stack gap-2" style={{ paddingTop: 4 }}>
+          {l.adAccountId && (
+            <div className="row gap-6" style={{ fontSize: 11 }}>
+              <span className="meta">Ad account</span>
+              <span className="mono" style={{ color: 'var(--fg-2)' }}>
+                {l.adAccountId}
+              </span>
+            </div>
+          )}
+          {l.pageId && (
+            <div className="row gap-6" style={{ fontSize: 11 }}>
+              <span className="meta">FB Page</span>
+              <span className="mono" style={{ color: 'var(--fg-2)' }}>
+                {l.pageId}
+              </span>
+            </div>
+          )}
+          {l.instagramBusinessAccountId && (
+            <div className="row gap-6" style={{ fontSize: 11 }}>
+              <span className="meta">IG Business</span>
+              <span className="mono" style={{ color: 'var(--fg-2)' }}>
+                {l.instagramBusinessAccountId}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+      <div
+        className="meta"
+        style={{ fontSize: 11, padding: '6px 8px', background: 'var(--bg-2)', borderRadius: 4 }}
+      >
+        ↳ Inherits brand rules from {parentName} (parent)
+      </div>
+      <div className="row gap-6">
+        <button className="btn sm" onClick={onOpen}>
+          Open
+        </button>
+        <button className="btn ghost sm" onClick={onEdit}>
+          Edit
+        </button>
+        <button className="btn ghost sm" onClick={onDelete}>
+          Delete
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function LocationForm({
   clientId,
+  existing,
   onCancel,
-  onAdded,
+  onSaved,
 }: {
   clientId: string;
+  existing: Location | null;
   onCancel: () => void;
-  onAdded: () => void;
+  onSaved: () => void;
 }) {
-  const [name, setName] = useState('');
-  const [address, setAddress] = useState('');
-  const [adAccountId, setAdAccountId] = useState('');
-  const [pageId, setPageId] = useState('');
-  const [igAccountId, setIgAccountId] = useState('');
+  const [name, setName] = useState(existing?.name ?? '');
+  const [address, setAddress] = useState(existing?.address ?? '');
+  const [adAccountId, setAdAccountId] = useState(existing?.adAccountId ?? '');
+  const [pageId, setPageId] = useState(existing?.pageId ?? '');
+  const [igAccountId, setIgAccountId] = useState(existing?.instagramBusinessAccountId ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -210,23 +281,27 @@ function AddLocationForm({
     setSubmitting(true);
     setError(null);
 
-    const id = `${slugify(name)}-${randomSuffix()}`;
-    const { error: dbErr } = await supabase.from('locations').insert({
-      id,
+    const payload = {
       client_id: clientId,
       name: name.trim(),
       address: address.trim(),
-      ad_account_id: adAccountId.trim() || null,
+      ad_account_id: normalizeAdAccountId(adAccountId) || null,
       page_id: pageId.trim() || null,
       instagram_business_account_id: igAccountId.trim() || null,
-    });
+    };
+
+    const result = existing
+      ? await supabase.from('locations').update(payload).eq('id', existing.id)
+      : await supabase
+          .from('locations')
+          .insert({ ...payload, id: `${slugify(name)}-${randomSuffix()}` });
 
     setSubmitting(false);
-    if (dbErr) {
-      setError(dbErr.message);
+    if (result.error) {
+      setError(result.error.message);
       return;
     }
-    onAdded();
+    onSaved();
   }
 
   return (
@@ -235,7 +310,7 @@ function AddLocationForm({
       className="card card-pad stack gap-10"
       style={{ minHeight: 180, padding: 16 }}
     >
-      <div style={{ fontWeight: 500 }}>Add location</div>
+      <div style={{ fontWeight: 500 }}>{existing ? 'Edit location' : 'Add location'}</div>
       <label className="stack gap-4">
         <span className="meta">Name</span>
         <input
@@ -291,10 +366,6 @@ function AddLocationForm({
           style={inputStyle}
           disabled={submitting}
         />
-        <span className="meta" style={{ fontSize: 11 }}>
-          Uses the parent client's Meta access token — these IDs scope which Page/IG account this
-          location publishes to and pulls insights from.
-        </span>
       </label>
       {error && (
         <div className="meta" style={{ color: 'var(--danger, #c33)', fontSize: 11 }}>
@@ -303,7 +374,7 @@ function AddLocationForm({
       )}
       <div className="row gap-6">
         <button type="submit" className="btn primary sm" disabled={submitting}>
-          {submitting ? 'Saving…' : 'Save'}
+          {submitting ? 'Saving…' : existing ? 'Save changes' : 'Save'}
         </button>
         <button type="button" className="btn ghost sm" onClick={onCancel} disabled={submitting}>
           Cancel
