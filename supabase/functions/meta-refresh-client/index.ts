@@ -100,31 +100,121 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
     );
 
-    const { data: meta, error: metaErr } = await serviceClient
-      .from('meta_accounts')
-      .select('account_id, access_token')
-      .eq('client_id', body.client_id)
-      .maybeSingle();
-    if (metaErr || !meta?.access_token || !meta?.account_id) {
+    // Token resolution: prefer the workspace-level master token; fall back
+    // to the per-client meta_accounts.access_token for clients set up
+    // before the workspace credentials migration.
+    const accessToken = await resolveAccessToken(
+      serviceClient,
+      clientRow.workspace_id as string,
+      body.client_id,
+    );
+    if (!accessToken) {
       return json(
-        { ok: false, error: 'No Meta connection for this client (token + ad account ID required)' },
+        {
+          ok: false,
+          error:
+            'No Meta access token configured. Set one in Settings → Connections (workspace level) or on the client\'s Ad Accounts tab.',
+        },
         400,
       );
     }
 
-    // 3. Pull campaigns from Meta + insights for each.
-    const refreshSummary = await refreshFromMeta(
+    // Ad account resolution: prefer per-location ad_account_id values
+    // (multi-location agencies). Fall back to the single
+    // meta_accounts.account_id for clients that haven't split out
+    // locations yet.
+    const adAccountIds = await resolveAdAccountIds(serviceClient, body.client_id);
+    if (adAccountIds.length === 0) {
+      return json(
+        {
+          ok: false,
+          error:
+            'No Meta ad accounts configured for this client. Add ad_account_id on each location, or set one on the client\'s Ad Accounts tab.',
+        },
+        400,
+      );
+    }
+
+    // 3. Pull campaigns for each ad account.
+    const summary = await refreshAllAdAccounts(
       body.client_id,
-      meta.account_id as string,
-      meta.access_token as string,
+      adAccountIds,
+      accessToken,
       serviceClient,
     );
 
-    return json(refreshSummary, refreshSummary.ok ? 200 : 502);
+    return json(summary, summary.ok ? 200 : 502);
   } catch (e) {
     return json({ ok: false, error: (e as Error).message }, 500);
   }
 });
+
+async function resolveAccessToken(
+  service: ReturnType<typeof createClient>,
+  workspaceId: string,
+  clientId: string,
+): Promise<string | null> {
+  const { data: ws } = await service
+    .from('workspace_meta_credentials')
+    .select('access_token')
+    .eq('workspace_id', workspaceId)
+    .maybeSingle();
+  if (ws?.access_token) return ws.access_token as string;
+
+  const { data: legacy } = await service
+    .from('meta_accounts')
+    .select('access_token')
+    .eq('client_id', clientId)
+    .maybeSingle();
+  return (legacy?.access_token as string | undefined) ?? null;
+}
+
+async function resolveAdAccountIds(
+  service: ReturnType<typeof createClient>,
+  clientId: string,
+): Promise<string[]> {
+  const { data: locs } = await service
+    .from('locations')
+    .select('ad_account_id')
+    .eq('client_id', clientId)
+    .not('ad_account_id', 'is', null);
+  const fromLocations = (locs ?? [])
+    .map((l) => (l.ad_account_id as string | null) ?? '')
+    .filter(Boolean);
+  if (fromLocations.length > 0) return fromLocations;
+
+  const { data: legacy } = await service
+    .from('meta_accounts')
+    .select('account_id')
+    .eq('client_id', clientId)
+    .maybeSingle();
+  return legacy?.account_id ? [legacy.account_id as string] : [];
+}
+
+async function refreshAllAdAccounts(
+  clientId: string,
+  adAccountIds: string[],
+  accessToken: string,
+  service: ReturnType<typeof createClient>,
+): Promise<RefreshResult> {
+  let total = 0;
+  const errors: string[] = [];
+  for (const id of adAccountIds) {
+    const r = await refreshFromMeta(clientId, id, accessToken, service);
+    if (!r.ok) {
+      errors.push(`${id}: ${r.error}`);
+      continue;
+    }
+    total += r.refreshed ?? 0;
+    if (r.errors) errors.push(...r.errors);
+  }
+  return {
+    ok: errors.length === 0 || total > 0,
+    refreshed: total,
+    errors: errors.length ? errors : undefined,
+    at: new Date().toISOString(),
+  };
+}
 
 async function refreshFromMeta(
   clientId: string,

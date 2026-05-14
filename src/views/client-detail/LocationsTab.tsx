@@ -42,7 +42,7 @@ export function LocationsTab({ clientId, parentName }: Props) {
     const { data, error } = await supabase
       .from('locations')
       .select(
-        'id, name, address, mtd_spend, active_campaigns, posts_per_week, complete, page_id, instagram_business_account_id',
+        'id, name, address, mtd_spend, active_campaigns, posts_per_week, complete, page_id, instagram_business_account_id, ad_account_id',
       )
       .eq('client_id', clientId)
       .order('name');
@@ -61,6 +61,7 @@ export function LocationsTab({ clientId, parentName }: Props) {
         complete: r.complete as number,
         pageId: (r.page_id as string | null) ?? null,
         instagramBusinessAccountId: (r.instagram_business_account_id as string | null) ?? null,
+        adAccountId: (r.ad_account_id as string | null) ?? null,
       })),
     );
   }
@@ -104,8 +105,16 @@ export function LocationsTab({ clientId, parentName }: Props) {
               <span style={{ fontWeight: 500 }}>{l.postsPerWeek}</span>
             </div>
           </div>
-          {(l.pageId || l.instagramBusinessAccountId) && (
+          {(l.pageId || l.instagramBusinessAccountId || l.adAccountId) && (
             <div className="stack gap-2" style={{ paddingTop: 4 }}>
+              {l.adAccountId && (
+                <div className="row gap-6" style={{ fontSize: 11 }}>
+                  <span className="meta">Ad account</span>
+                  <span className="mono" style={{ color: 'var(--fg-2)' }}>
+                    {l.adAccountId}
+                  </span>
+                </div>
+              )}
               {l.pageId && (
                 <div className="row gap-6" style={{ fontSize: 11 }}>
                   <span className="meta">FB Page</span>
@@ -182,6 +191,7 @@ function AddLocationForm({
 }) {
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
+  const [adAccountId, setAdAccountId] = useState('');
   const [pageId, setPageId] = useState('');
   const [igAccountId, setIgAccountId] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -206,6 +216,7 @@ function AddLocationForm({
       client_id: clientId,
       name: name.trim(),
       address: address.trim(),
+      ad_account_id: adAccountId.trim() || null,
       page_id: pageId.trim() || null,
       instagram_business_account_id: igAccountId.trim() || null,
     });
@@ -244,6 +255,17 @@ function AddLocationForm({
           value={address}
           onChange={(e) => setAddress(e.target.value)}
           placeholder="14290 Plymouth Ave Burnsville MN"
+          style={inputStyle}
+          disabled={submitting}
+        />
+      </label>
+      <label className="stack gap-4">
+        <span className="meta">Meta Ad Account ID (optional)</span>
+        <input
+          type="text"
+          value={adAccountId}
+          onChange={(e) => setAdAccountId(e.target.value)}
+          placeholder="act_1069387220952651"
           style={inputStyle}
           disabled={submitting}
         />

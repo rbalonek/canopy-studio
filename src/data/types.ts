@@ -21,6 +21,8 @@ export type Location = {
   pageId?: string | null;
   /** Instagram Business account ID for this location (same token as the Page). */
   instagramBusinessAccountId?: string | null;
+  /** Meta ad account ID for this location (act_NNNNN). Each location can have its own. */
+  adAccountId?: string | null;
 };
 
 export type Client = {
