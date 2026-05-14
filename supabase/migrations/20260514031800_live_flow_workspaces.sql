@@ -96,7 +96,11 @@ create trigger workspaces_add_owner
 -- ---------------------------------------------------------------------------
 -- Scope clients (and children) to a workspace
 -- ---------------------------------------------------------------------------
-delete from clients;  -- wipe orphan seed data; mock fixtures still cover /dev
+-- Wipe orphan seed rows before adding NOT NULL workspace_id columns.
+-- Cascades clear the children that reference clients(id). /dev still has
+-- everything via the mock fixtures.
+delete from clients;
+delete from urgent_issues;
 
 alter table clients
   add column workspace_id uuid not null references workspaces(id) on delete cascade;
