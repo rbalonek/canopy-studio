@@ -1,6 +1,9 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import type { Session, User } from '@supabase/supabase-js';
+import type { Provider, Session, User } from '@supabase/supabase-js';
 import { supabase } from './supabaseClient';
+
+/** OAuth providers we expose in the UI. Must be enabled in the Supabase dashboard before they work. */
+export type OAuthProvider = Extract<Provider, 'google' | 'azure' | 'apple'>;
 
 type AuthState = {
   session: Session | null;
@@ -14,6 +17,7 @@ type AuthContextValue = AuthState & {
     email: string,
     password: string,
   ): Promise<{ error: Error | null; needsConfirmation: boolean }>;
+  signInWithOAuth(provider: OAuthProvider): Promise<{ error: Error | null }>;
   signOut(): Promise<void>;
   resetPassword(email: string): Promise<{ error: Error | null }>;
 };
@@ -57,6 +61,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // the link in their inbox.
       const needsConfirmation = !error && !data.session;
       return { error, needsConfirmation };
+    },
+    async signInWithOAuth(provider) {
+      if (!supabase) return { error: new Error('Supabase not configured') };
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: { redirectTo: `${window.location.origin}/` },
+      });
+      // On success the browser navigates to the provider — code below
+      // only runs when the redirect itself failed.
+      return { error };
     },
     async signOut() {
       if (!supabase) return;

@@ -1,9 +1,15 @@
 import { useState, type FormEvent } from 'react';
-import { useAuth } from '../auth/AuthProvider';
+import { useAuth, type OAuthProvider } from '../auth/AuthProvider';
 
 type Mode = 'login' | 'signup' | 'reset';
 
 const TRUST_TAGS = ['SOC 2 ready', 'Built on Supabase', 'Stripe-secured'];
+
+const OAUTH_PROVIDERS: { id: OAuthProvider; label: string }[] = [
+  { id: 'google', label: 'Google' },
+  { id: 'azure', label: 'Microsoft' },
+  { id: 'apple', label: 'Apple' },
+];
 
 /**
  * Live login view. Same hero + side-panel layout as the /dev/auth
@@ -48,6 +54,19 @@ export function Login() {
       } else {
         setMessage({ kind: 'info', text: `Check ${email} for a reset link.` });
       }
+    }
+  }
+
+  async function onOAuth(provider: OAuthProvider) {
+    setSubmitting(true);
+    setMessage(null);
+    const { error } = await auth.signInWithOAuth(provider);
+    // On success the browser is already navigating to the provider; we
+    // only see this path if signInWithOAuth itself rejected (e.g.
+    // provider not enabled in the Supabase dashboard).
+    if (error) {
+      setSubmitting(false);
+      setMessage({ kind: 'error', text: error.message });
     }
   }
 
@@ -98,6 +117,28 @@ export function Login() {
               </div>
             ))}
           </div>
+
+          {mode !== 'reset' && (
+            <div className="stack gap-10" style={{ marginBottom: 16 }}>
+              {OAUTH_PROVIDERS.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className="btn"
+                  style={{ justifyContent: 'center', padding: 10 }}
+                  onClick={() => onOAuth(p.id)}
+                  disabled={submitting}
+                >
+                  Continue with {p.label}
+                </button>
+              ))}
+              <div className="row gap-8 meta" style={{ margin: '4px 0' }}>
+                <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                <span>or</span>
+                <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+              </div>
+            </div>
+          )}
 
           <form className="stack gap-10" onSubmit={onSubmit}>
             <label className="stack gap-4">
