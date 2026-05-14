@@ -53,24 +53,22 @@ export function LiveOnboard() {
 
     const slug = `${slugify(workspaceName)}-${randomSuffix()}`;
 
-    // 1. Workspace (the trigger adds the owner to workspace_members)
-    const { data: ws, error: wsErr } = await supabase
-      .from('workspaces')
-      .insert({
-        name: workspaceName.trim(),
-        slug,
-        mode,
-        owner_id: auth.user.id,
-      })
-      .select()
-      .single();
+    // 1. Workspace via the create_workspace RPC. It runs SECURITY DEFINER,
+    // inserts the workspaces row + workspace_members owner row atomically,
+    // and raises 'Not authenticated' if auth.uid() is null server-side.
+    const { data: ws, error: wsErr } = await supabase.rpc('create_workspace', {
+      p_name: workspaceName.trim(),
+      p_slug: slug,
+      p_mode: mode,
+    });
     if (wsErr || !ws) {
       setSubmitting(false);
-      // RLS rejection almost always means the JWT didn't validate
-      // server-side (auth.uid() came back null), which is unrecoverable
-      // without a fresh sign-in. Bail cleanly instead of showing the
-      // bare Postgres error.
-      if (wsErr?.message?.includes('row-level security')) {
+      // "Not authenticated" or any RLS rejection means the JWT didn't
+      // validate server-side. Sign out and bounce to Login.
+      if (
+        wsErr?.message?.includes('Not authenticated') ||
+        wsErr?.message?.includes('row-level security')
+      ) {
         await handleStaleSession();
         return false;
       }
