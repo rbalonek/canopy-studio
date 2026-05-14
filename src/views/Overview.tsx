@@ -330,37 +330,60 @@ export function Overview() {
           </div>
         </div>
         <div style={{ padding: 16 }}>
-          <AreaChart h={220} seeds={[1, 3, 5, 7, 9]} />
-          <div
-            className="row gap-16"
-            style={{
-              marginTop: 12,
-              paddingTop: 12,
-              borderTop: '1px solid var(--border)',
-              flexWrap: 'wrap',
-            }}
-          >
-            {filtered.slice(0, 5).map((c, i) => (
-              <div key={i} className="row gap-6" style={{ fontSize: 12 }}>
-                <span
-                  style={{
-                    width: 10,
-                    height: 10,
-                    borderRadius: 2,
-                    background: PALETTE[i % PALETTE.length],
-                    display: 'inline-block',
-                  }}
-                />
-                <span style={{ color: 'var(--fg-2)' }}>{c.name}</span>
-                <span className="meta" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                  {c.spend}
-                </span>
+          {filtered.length === 0 ? (
+            <div
+              className="stack gap-8"
+              style={{
+                height: 220,
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'var(--fg-3)',
+                border: '1px dashed var(--border)',
+                borderRadius: 8,
+              }}
+            >
+              <span style={{ fontSize: 13 }}>No spend data yet</span>
+              <span className="meta" style={{ fontSize: 11, textAlign: 'center', maxWidth: 320 }}>
+                Connect a Meta ad account on a client (Clients →{' '}
+                {state.mode === 'agency' ? 'a client' : 'a location'} → Ad Accounts) to start
+                pulling spend over time.
+              </span>
+            </div>
+          ) : (
+            <>
+              <AreaChart h={220} seeds={[1, 3, 5, 7, 9]} />
+              <div
+                className="row gap-16"
+                style={{
+                  marginTop: 12,
+                  paddingTop: 12,
+                  borderTop: '1px solid var(--border)',
+                  flexWrap: 'wrap',
+                }}
+              >
+                {filtered.slice(0, 5).map((c, i) => (
+                  <div key={i} className="row gap-6" style={{ fontSize: 12 }}>
+                    <span
+                      style={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: 2,
+                        background: PALETTE[i % PALETTE.length],
+                        display: 'inline-block',
+                      }}
+                    />
+                    <span style={{ color: 'var(--fg-2)' }}>{c.name}</span>
+                    <span className="meta" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {c.spend}
+                    </span>
+                  </div>
+                ))}
+                {filtered.length > 5 && (
+                  <span className="meta">+{filtered.length - 5} more</span>
+                )}
               </div>
-            ))}
-            {filtered.length > 5 && (
-              <span className="meta">+{filtered.length - 5} more</span>
-            )}
-          </div>
+            </>
+          )}
         </div>
       </div>
     </div>

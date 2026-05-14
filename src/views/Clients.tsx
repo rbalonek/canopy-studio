@@ -5,6 +5,7 @@ import { Icon } from '../components/Icon';
 import { useQuery } from '../data/context';
 import type { ClientCard } from '../data/types';
 import { useAppState } from '../shell/AppState';
+import { useWorkspace } from '../workspace/WorkspaceProvider';
 
 const FILTER_CHIPS = ['Active campaigns', 'Has META', 'Multi-location', 'Brand 100%', 'Industry: Dental'];
 
@@ -13,12 +14,15 @@ type Layout = 'grid' | 'list';
 export function Clients() {
   const { state } = useAppState();
   const navigate = useNavigate();
+  const workspace = useWorkspace();
   const label = state.mode === 'agency' ? 'Clients' : 'Locations';
   const singular = state.mode === 'agency' ? 'client' : 'location';
 
   const { data: cards } = useQuery<ClientCard[]>((p) => p.listClientCards());
   const [layout, setLayout] = useState<Layout>('grid');
   const multiLocationCount = cards?.filter((c) => c.parent).length ?? 0;
+  const shellPrefix = workspace ? `/app/${workspace.slug}` : '/dev';
+  const goToClient = (id: string) => navigate(`${shellPrefix}/clients/${id}`);
 
   return (
     <div className="content wide">
@@ -67,7 +71,7 @@ export function Clients() {
               campaigns={c.activeCampaigns}
               posts={c.postsPerWeek}
               complete={c.complete}
-              onClick={() => navigate(`/clients/${c.id}`)}
+              onClick={() => goToClient(c.id)}
             />
           ))}
         </div>
@@ -88,7 +92,7 @@ export function Clients() {
               {cards?.map((c) => (
                 <tr
                   key={c.id}
-                  onClick={() => navigate(`/clients/${c.id}`)}
+                  onClick={() => goToClient(c.id)}
                   style={{ cursor: 'pointer' }}
                 >
                   <td>

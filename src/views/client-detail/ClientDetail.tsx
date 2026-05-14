@@ -4,6 +4,7 @@ import { Icon } from '../../components/Icon';
 import { useQuery } from '../../data/context';
 import type { ClientHeader } from '../../data/types';
 import { useAppState } from '../../shell/AppState';
+import { useWorkspace } from '../../workspace/WorkspaceProvider';
 import { AdAccountsTab } from './AdAccountsTab';
 import { AssetsTab } from './AssetsTab';
 import { BrandTab } from './BrandTab';
@@ -25,8 +26,10 @@ const BASE_TABS: TabId[] = ['overview', 'brand', 'assets', 'scraped pages', 'com
 
 export function ClientDetail() {
   const { state } = useAppState();
+  const workspace = useWorkspace();
   const params = useParams<{ id: string }>();
   const clientId = params.id ?? '';
+  const clientsPath = (workspace ? `/app/${workspace.slug}` : '/dev') + '/clients';
 
   const { data: header, loading } = useQuery<ClientHeader | null>(
     (p) => p.getClientHeader(clientId),
@@ -52,7 +55,7 @@ export function ClientDetail() {
           <span className="meta">
             No {state.mode === 'agency' ? 'client' : 'location'} with id "{clientId}".
           </span>
-          <Link to="/clients" className="btn ghost sm" style={{ alignSelf: 'flex-start' }}>
+          <Link to={clientsPath} className="btn ghost sm" style={{ alignSelf: 'flex-start' }}>
             ← Back to {state.mode === 'agency' ? 'clients' : 'locations'}
           </Link>
         </div>
@@ -69,7 +72,7 @@ export function ClientDetail() {
   return (
     <div className="content wide">
       <div className="row gap-8 meta" style={{ marginBottom: 8 }}>
-        <Link to="/clients" style={{ color: 'inherit', textDecoration: 'none' }}>
+        <Link to={clientsPath} style={{ color: 'inherit', textDecoration: 'none' }}>
           {state.mode === 'agency' ? 'Clients' : 'Locations'}
         </Link>
         <span>/</span>
