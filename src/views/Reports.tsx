@@ -1,5 +1,7 @@
 import { Bars } from '../components/Bars';
+import { Empty } from '../components/Empty';
 import { Icon } from '../components/Icon';
+import { useWorkspace } from '../workspace/WorkspaceProvider';
 
 const SAVED_REPORTS: { title: string; cadence: string; icon: string }[] = [
   { title: 'Weekly spend by client',        cadence: 'Monday 8:00 AM · jordan@redwood.co', icon: 'chart' },
@@ -12,6 +14,22 @@ const VIZ_OPTIONS = ['Line', 'Bar', 'Table', 'Funnel'] as const;
 const SCHEDULE_OPTIONS = ['None', 'Daily', 'Weekly'] as const;
 
 export function Reports() {
+  const workspace = useWorkspace();
+  if (workspace) {
+    return (
+      <div className="content wide">
+        <h1 className="h0" style={{ marginBottom: 16 }}>
+          Reports
+        </h1>
+        <Empty
+          title="No saved reports yet"
+          body="Scheduled performance reports, CSV exports, and client digests will appear here. Lands once multi-period campaign history is in place."
+          icon="report"
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="content wide">
       <div className="row between" style={{ marginBottom: 16 }}>

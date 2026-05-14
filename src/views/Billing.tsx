@@ -1,7 +1,9 @@
 import { Bars } from '../components/Bars';
 import { Delta } from '../components/Delta';
+import { Empty } from '../components/Empty';
 import { Icon } from '../components/Icon';
 import { Spark } from '../components/Spark';
+import { useWorkspace } from '../workspace/WorkspaceProvider';
 
 type Usage = {
   title: string;
@@ -63,6 +65,22 @@ const SPEND_CATEGORIES = [
 ];
 
 export function Billing() {
+  const workspace = useWorkspace();
+  if (workspace) {
+    return (
+      <div className="content wide">
+        <h1 className="h0" style={{ marginBottom: 16 }}>
+          Billing
+        </h1>
+        <Empty
+          title="Billing isn't connected yet"
+          body="Subscription tier, invoices, seat usage, and usage-based add-ons will appear here once we wire up Stripe."
+          icon="report"
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="content wide">
       <div className="banner red" style={{ marginBottom: 16 }}>

@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { AIBadge } from '../../components/AIBadge';
+import { Empty } from '../../components/Empty';
 import { Icon } from '../../components/Icon';
 import { useQuery } from '../../data/context';
 import type { BrandIntelligenceStats, BrandTakeaway } from '../../data/types';
+import { useWorkspace } from '../../workspace/WorkspaceProvider';
 import { CompareTab } from './CompareTab';
 import { BrandCompetitorsTab } from './CompetitorsTab';
 import { BrandAssetsTab } from './AssetsTab';
@@ -15,6 +17,22 @@ type TabId = 'competitors' | 'compare' | 'gaps & angles' | 'websites' | 'rules' 
 const TABS: TabId[] = ['competitors', 'compare', 'gaps & angles', 'websites', 'rules', 'assets'];
 
 export function BrandIntelligence() {
+  const workspace = useWorkspace();
+  if (workspace) {
+    return (
+      <div className="content wide">
+        <h1 className="h0" style={{ marginBottom: 16 }}>
+          Brand Intelligence
+        </h1>
+        <Empty
+          title="No brand data yet"
+          body="Competitor tracking, content gaps, scraped pages, and AI-generated insights about each client's brand position land here. The website scraper port from Swimm-Copywriting-API populates this — coming next."
+          icon="brain"
+        />
+      </div>
+    );
+  }
+
   const { data: stats } = useQuery<BrandIntelligenceStats>((p) => p.getBrandIntelligenceStats());
   const { data: takeaway } = useQuery<BrandTakeaway>((p) => p.getBrandTakeaway());
   const [tab, setTab] = useState<TabId>('competitors');

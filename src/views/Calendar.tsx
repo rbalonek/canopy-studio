@@ -1,7 +1,9 @@
+import { Empty } from '../components/Empty';
 import { Icon } from '../components/Icon';
 import { Status } from '../components/Status';
 import { useQuery } from '../data/context';
 import type { PostStatus, WeekPostsDay } from '../data/types';
+import { useWorkspace } from '../workspace/WorkspaceProvider';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 const POST_DATES = [3, 5, 8, 10, 12, 15, 17, 19, 21, 23, 26, 28];
@@ -21,7 +23,23 @@ function fmtIcon(fmt: 'Post' | 'Reel' | 'Carousel'): string {
 }
 
 export function Calendar() {
+  const workspace = useWorkspace();
   const { data: week } = useQuery<WeekPostsDay[]>((p) => p.listPostsWeek());
+
+  if (workspace) {
+    return (
+      <div className="content wide">
+        <h1 className="h0" style={{ marginBottom: 16 }}>
+          Content Calendar
+        </h1>
+        <Empty
+          title="No scheduled posts yet"
+          body="Schedule and review posts across Facebook and Instagram from one calendar. Wires up after we port the posts publishing pipeline."
+          icon="calendar"
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="content wide">

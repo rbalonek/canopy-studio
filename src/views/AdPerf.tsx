@@ -6,8 +6,10 @@ import { DeltaSpark } from '../components/DeltaSpark';
 import { Icon } from '../components/Icon';
 import { Status } from '../components/Status';
 import { Strategy } from '../components/Strategy';
+import { Empty } from '../components/Empty';
 import { useQuery } from '../data/context';
 import type { AdInsight, AdPerfTreeNode, CampaignDetail } from '../data/types';
+import { useWorkspace } from '../workspace/WorkspaceProvider';
 
 const PERIODS = ['Yesterday', '7d', '30d', 'MTD', 'QTD', 'Custom'] as const;
 const FILTERS = ['Strategy: All', 'Status: Active', 'Spend > $500', 'Has conversions'];
@@ -19,6 +21,22 @@ const INSIGHT_PILL: Record<AdInsight['accent'], string> = {
 };
 
 export function AdPerf() {
+  const workspace = useWorkspace();
+  if (workspace) {
+    return (
+      <div className="content wide">
+        <h1 className="h0" style={{ marginBottom: 16 }}>
+          Ad Performance
+        </h1>
+        <Empty
+          title="Workspace-wide drill-down coming next"
+          body="For now, live campaigns / ad sets / ads live on each client's Ad Accounts tab. A workspace-wide rollup with multi-period spend and ROAS lands once we port the historical data ingestion."
+          icon="chart"
+        />
+      </div>
+    );
+  }
+
   const { data: tree } = useQuery<AdPerfTreeNode[]>((p) => p.listAdPerfTree());
   const [selectedNodeId, setSelectedNodeId] = useState<string>('n_cmp_82910');
 

@@ -1,7 +1,9 @@
 import { useMemo } from 'react';
+import { Empty } from '../components/Empty';
 import { Icon } from '../components/Icon';
 import { useQuery } from '../data/context';
 import type { QueuedPost } from '../data/types';
+import { useWorkspace } from '../workspace/WorkspaceProvider';
 
 const COLUMNS: { key: QueuedPost['status']; label: string }[] = [
   { key: 'Queued',     label: 'Queued' },
@@ -17,6 +19,22 @@ function fmtIcon(fmt: QueuedPost['fmt']): string {
 }
 
 export function Publish() {
+  const workspace = useWorkspace();
+  if (workspace) {
+    return (
+      <div className="content wide">
+        <h1 className="h0" style={{ marginBottom: 16 }}>
+          Publishing Queue
+        </h1>
+        <Empty
+          title="Nothing queued"
+          body="Posts queued for Facebook + Instagram publishing show here. Currently dormant — the queue activates once we port the publishing pipeline."
+          icon="queue"
+        />
+      </div>
+    );
+  }
+
   const { data: queue } = useQuery<QueuedPost[]>((p) => p.listPostsQueue());
 
   const byStatus = useMemo(() => {

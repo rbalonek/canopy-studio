@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
 import { AIBadge } from '../components/AIBadge';
+import { Empty } from '../components/Empty';
 import { Status } from '../components/Status';
 import { useQuery } from '../data/context';
 import type { ApprovalItem, ApprovalKind } from '../data/types';
+import { useWorkspace } from '../workspace/WorkspaceProvider';
 
 type TabKey = 'all' | 'posts' | 'ads' | 'comments';
 
@@ -13,6 +15,22 @@ const TAB_KIND: Record<Exclude<TabKey, 'all'>, ApprovalKind> = {
 };
 
 export function Approvals() {
+  const workspace = useWorkspace();
+  if (workspace) {
+    return (
+      <div className="content wide">
+        <h1 className="h0" style={{ marginBottom: 16 }}>
+          Approvals
+        </h1>
+        <Empty
+          title="Nothing in the approval queue"
+          body="Post drafts and ad creatives waiting for your sign-off will appear here. Wires up once the posts publishing pipeline ships."
+          icon="check"
+        />
+      </div>
+    );
+  }
+
   const { data: approvals, loading } = useQuery<ApprovalItem[]>((p) => p.listApprovals());
   const [tab, setTab] = useState<TabKey>('all');
 
