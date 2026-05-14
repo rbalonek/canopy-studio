@@ -1,6 +1,7 @@
+import { useEffect, useState, type FormEvent } from 'react';
+import { supabase } from '../../auth/supabaseClient';
 import { Icon } from '../../components/Icon';
 import { Ring } from '../../components/Ring';
-import { useQuery } from '../../data/context';
 import type { Location } from '../../data/types';
 
 type Props = {
@@ -16,19 +17,62 @@ function initialsFromLocationName(name: string): string {
   return tail.slice(0, 2);
 }
 
-export function LocationsTab({ clientId, parentName }: Props) {
-  const { data: locations, loading } = useQuery<Location[]>(
-    (p) => p.listLocationsForClient(clientId),
-    [clientId],
-  );
+function slugify(s: string): string {
+  return s
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 40);
+}
 
-  if (loading) {
+function randomSuffix(): string {
+  return Math.random().toString(36).slice(2, 6);
+}
+
+export function LocationsTab({ clientId, parentName }: Props) {
+  const [locations, setLocations] = useState<Location[] | null>(null);
+  const [adding, setAdding] = useState(false);
+
+  async function refresh() {
+    if (!supabase) {
+      setLocations([]);
+      return;
+    }
+    const { data, error } = await supabase
+      .from('locations')
+      .select('id, name, address, mtd_spend, active_campaigns, posts_per_week, complete')
+      .eq('client_id', clientId)
+      .order('name');
+    if (error || !data) {
+      setLocations([]);
+      return;
+    }
+    setLocations(
+      data.map((r) => ({
+        id: r.id as string,
+        name: r.name as string,
+        address: r.address as string,
+        mtdSpend: r.mtd_spend as string,
+        activeCampaigns: r.active_campaigns as number,
+        postsPerWeek: r.posts_per_week as number,
+        complete: r.complete as number,
+      })),
+    );
+  }
+
+  useEffect(() => {
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId]);
+
+  if (locations === null) {
     return <div className="meta">Loading…</div>;
   }
 
   return (
     <div className="grid grid-3 gap-16" style={{ gap: 16 }}>
-      {(locations ?? []).map((l) => (
+      {locations.map((l) => (
         <div key={l.id} className="card card-pad stack gap-10">
           <div className="row between">
             <div className="row gap-8">
@@ -69,21 +113,140 @@ export function LocationsTab({ clientId, parentName }: Props) {
         </div>
       ))}
 
-      <div
-        className="card card-pad stack gap-8"
-        style={{
-          borderStyle: 'dashed',
-          alignItems: 'center',
-          justifyContent: 'center',
-          minHeight: 180,
-          cursor: 'pointer',
-        }}
-      >
-        <Icon name="plus" size={24} />
-        <span style={{ fontWeight: 500 }}>Add location</span>
-        <span className="meta">Inherits brand rules from parent</span>
-      </div>
+      {adding ? (
+        <AddLocationForm
+          clientId={clientId}
+          onCancel={() => setAdding(false)}
+          onAdded={() => {
+            setAdding(false);
+            refresh();
+          }}
+        />
+      ) : (
+        <button
+          type="button"
+          className="card card-pad stack gap-8"
+          style={{
+            borderStyle: 'dashed',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minHeight: 180,
+            cursor: 'pointer',
+            background: 'transparent',
+            color: 'inherit',
+            font: 'inherit',
+          }}
+          onClick={() => setAdding(true)}
+        >
+          <Icon name="plus" size={24} />
+          <span style={{ fontWeight: 500 }}>Add location</span>
+          <span className="meta">Inherits brand rules from parent</span>
+        </button>
+      )}
     </div>
   );
 }
 
+function AddLocationForm({
+  clientId,
+  onCancel,
+  onAdded,
+}: {
+  clientId: string;
+  onCancel: () => void;
+  onAdded: () => void;
+}) {
+  const [name, setName] = useState('');
+  const [address, setAddress] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!supabase) {
+      setError('Supabase not configured');
+      return;
+    }
+    if (!name.trim() || !address.trim()) {
+      setError('Name and address are required');
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+
+    const id = `${slugify(name)}-${randomSuffix()}`;
+    const { error: dbErr } = await supabase.from('locations').insert({
+      id,
+      client_id: clientId,
+      name: name.trim(),
+      address: address.trim(),
+      mtd_spend: '$0',
+      active_campaigns: 0,
+      posts_per_week: 0,
+      complete: 0,
+    });
+
+    setSubmitting(false);
+    if (dbErr) {
+      setError(dbErr.message);
+      return;
+    }
+    onAdded();
+  }
+
+  return (
+    <form
+      onSubmit={onSubmit}
+      className="card card-pad stack gap-10"
+      style={{ minHeight: 180, padding: 16 }}
+    >
+      <div style={{ fontWeight: 500 }}>Add location</div>
+      <label className="stack gap-4">
+        <span className="meta">Name</span>
+        <input
+          type="text"
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Acme Dental — Downtown"
+          style={inputStyle}
+          disabled={submitting}
+        />
+      </label>
+      <label className="stack gap-4">
+        <span className="meta">Address</span>
+        <input
+          type="text"
+          value={address}
+          onChange={(e) => setAddress(e.target.value)}
+          placeholder="284 Ember Row"
+          style={inputStyle}
+          disabled={submitting}
+        />
+      </label>
+      {error && (
+        <div className="meta" style={{ color: 'var(--danger, #c33)', fontSize: 11 }}>
+          ⚠ {error}
+        </div>
+      )}
+      <div className="row gap-6">
+        <button type="submit" className="btn primary sm" disabled={submitting}>
+          {submitting ? 'Saving…' : 'Save'}
+        </button>
+        <button type="button" className="btn ghost sm" onClick={onCancel} disabled={submitting}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+const inputStyle: React.CSSProperties = {
+  background: 'var(--bg-1)',
+  border: '1px solid var(--border)',
+  borderRadius: 6,
+  color: 'var(--fg)',
+  padding: '8px 10px',
+  font: 'inherit',
+  fontSize: 13,
+};

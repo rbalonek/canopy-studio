@@ -134,7 +134,9 @@ function ConnectionCard({
           />
         </div>
         <div className="meta" style={{ fontSize: 11 }}>
-          Last updated {updated}. The token is write-only — to change it, click Update credentials.
+          Last updated {updated}. The token is stored and used server-side to call the Meta Graph
+          API — we don't display it back to the browser for security. To replace it, click Update
+          credentials.
         </div>
       </div>
     </div>
