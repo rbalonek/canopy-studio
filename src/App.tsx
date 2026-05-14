@@ -2,27 +2,32 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { AppStateProvider } from './shell/AppState';
 import { AppShell } from './shell/AppShell';
 import { DataProviderProvider } from './data/context';
-import { pickProvider } from './data/pickProvider';
-
-const provider = pickProvider();
+import { mockDataProvider } from './data/mockProvider';
 
 /**
  * Top-level router.
  *
  *   /         → redirect to /dev (will become the live flow root once auth lands)
- *   /dev/*    → design / wireframe reference, no auth, fixture or local-supabase data
- *   /app/*    → (future) live, auth-gated product mounted by the same AppShell
+ *   /dev/*    → design / wireframe reference, no auth, always reads the mock
+ *               provider so the showroom is independent of the live schema
+ *   /app/*    → (future) live, auth-gated product, supabase provider scoped
+ *               to the authenticated user's workspace
  */
 export default function App() {
   return (
     <AppStateProvider>
-      <DataProviderProvider provider={provider}>
-        <Routes>
-          <Route path="/" element={<Navigate to="/dev" replace />} />
-          <Route path="/dev/*" element={<AppShell prefix="/dev" />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </DataProviderProvider>
+      <Routes>
+        <Route path="/" element={<Navigate to="/dev" replace />} />
+        <Route
+          path="/dev/*"
+          element={
+            <DataProviderProvider provider={mockDataProvider}>
+              <AppShell prefix="/dev" />
+            </DataProviderProvider>
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
     </AppStateProvider>
   );
 }

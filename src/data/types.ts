@@ -392,3 +392,34 @@ export type BrandProfile = {
   /** Object key / URL for the uploaded logo, or null when not uploaded. */
   logoUrl: string | null;
 };
+
+// ===========================================================================
+// Live-flow types: profiles, workspaces, membership.
+// These back the auth-aware /app/* product; the mock-driven /dev/* showroom
+// doesn't use them.
+// ===========================================================================
+
+export type WorkspaceMode = 'agency' | 'business';
+export type WorkspaceRole = 'owner' | 'admin' | 'member';
+
+export type Profile = {
+  /** Equals auth.users.id (a uuid). */
+  id: string;
+  displayName: string | null;
+  mode: WorkspaceMode;
+};
+
+export type Workspace = {
+  id: string;
+  name: string;
+  /** URL slug used in /app/<slug>/... paths. */
+  slug: string;
+  mode: WorkspaceMode;
+  ownerId: string;
+};
+
+export type WorkspaceMember = {
+  workspaceId: string;
+  userId: string;
+  role: WorkspaceRole;
+};
