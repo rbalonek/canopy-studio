@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../auth/AuthProvider';
+import { supabase } from '../auth/supabaseClient';
 import { AIBadge } from '../components/AIBadge';
 import { AreaChart } from '../components/AreaChart';
 import { DeltaSpark } from '../components/DeltaSpark';
@@ -10,6 +11,15 @@ import { Status } from '../components/Status';
 import { useQuery } from '../data/context';
 import type { Client, ClientPerfRow, UrgentIssue } from '../data/types';
 import { useAppState } from '../shell/AppState';
+import { useWorkspace } from '../workspace/WorkspaceProvider';
+
+type LiveAgg = {
+  totalSpend: number;
+  totalResults: number;
+  activeCampaigns: number;
+  avgRoas: number;
+  costPerResult: number;
+};
 
 type Scope = 'all' | `ind:${string}` | `one:${string}`;
 
@@ -28,11 +38,34 @@ function pickGreeting(d: Date): string {
 export function Overview() {
   const { state } = useAppState();
   const auth = useAuth();
+  const workspace = useWorkspace();
   const entity = state.mode === 'agency' ? 'clients' : 'locations';
 
   const { data: clients } = useQuery<Client[]>((p) => p.listClients());
   const { data: perf } = useQuery<ClientPerfRow[]>((p) => p.listClientPerf());
   const { data: urgent } = useQuery<UrgentIssue[]>((p) => p.listUrgent());
+
+  // Aggregate KPIs from the live campaigns table (workspace-scoped via RLS).
+  // Falls back to zeros until Refresh META has populated rows.
+  const [live, setLive] = useState<LiveAgg | null>(null);
+  useEffect(() => {
+    if (!supabase || !workspace) return;
+    supabase
+      .from('campaigns')
+      .select('status, mtd_spend, mtd_results, roas')
+      .then(({ data }) => {
+        const rows = data ?? [];
+        const totalSpend = rows.reduce((s, r) => s + parseFloat(String(r.mtd_spend ?? 0)), 0);
+        const totalResults = rows.reduce((s, r) => s + parseFloat(String(r.mtd_results ?? 0)), 0);
+        const roasRows = rows
+          .map((r) => parseFloat(String(r.roas ?? 0)))
+          .filter((v) => v > 0);
+        const avgRoas = roasRows.length ? roasRows.reduce((a, b) => a + b, 0) / roasRows.length : 0;
+        const activeCampaigns = rows.filter((r) => r.status === 'ACTIVE').length;
+        const costPerResult = totalResults > 0 ? totalSpend / totalResults : 0;
+        setLive({ totalSpend, totalResults, activeCampaigns, avgRoas, costPerResult });
+      });
+  }, [workspace?.id]);
 
   const displayName =
     (typeof auth.user?.user_metadata?.display_name === 'string'
@@ -71,14 +104,16 @@ export function Overview() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [perf, scope, clients]);
 
-  const totalSpend = filtered.reduce((a, c) => a + parseNum(c.spend), 0);
-  const totalConv = filtered.reduce((a, c) => a + c.conv, 0);
-  const avgRoas = filtered.length
-    ? filtered.reduce((a, c) => a + parseNum(c.roas), 0) / filtered.length
-    : 0;
-  const avgCpl = filtered.length
-    ? filtered.reduce((a, c) => a + parseNum(c.cpl), 0) / filtered.length
-    : 0;
+  // Prefer live campaign aggregates when available (workspace context),
+  // fall back to the mock-perf math for /dev showcase rendering.
+  const totalSpend = live?.totalSpend ?? filtered.reduce((a, c) => a + parseNum(c.spend), 0);
+  const totalConv = live?.totalResults ?? filtered.reduce((a, c) => a + c.conv, 0);
+  const avgRoas =
+    live?.avgRoas ??
+    (filtered.length ? filtered.reduce((a, c) => a + parseNum(c.roas), 0) / filtered.length : 0);
+  const avgCpl =
+    live?.costPerResult ??
+    (filtered.length ? filtered.reduce((a, c) => a + parseNum(c.cpl), 0) / filtered.length : 0);
 
   const scopeLabel =
     scope === 'all'
@@ -202,8 +237,13 @@ export function Overview() {
         {[
           {
             label: 'Active campaigns',
-            value: '0',
-            meta: totalClients ? `Across ${totalClients} ${entity}` : 'No campaigns yet',
+            value: String(live?.activeCampaigns ?? 0),
+            meta:
+              live && live.activeCampaigns > 0
+                ? `Across ${totalClients} ${entity}`
+                : totalClients
+                  ? `0 active across ${totalClients} ${entity}`
+                  : 'No campaigns yet',
           },
           { label: 'Posts pending approval', value: '0', meta: 'Nothing in queue' },
           { label: 'Scheduled (next 7d)', value: '0', meta: 'Nothing scheduled' },

@@ -27,6 +27,7 @@ export function LocationDetail() {
   const [editing, setEditing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshMsg, setRefreshMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  const [stats, setStats] = useState<{ mtdSpend: number; activeCampaigns: number } | null>(null);
 
   async function refresh() {
     if (!supabase || !locId) {
@@ -70,6 +71,25 @@ export function LocationDetail() {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locId]);
+
+  // Aggregate live campaign stats for this location's ad account.
+  useEffect(() => {
+    const adAccount = location?.adAccountId;
+    if (!supabase || !adAccount) {
+      setStats(null);
+      return;
+    }
+    supabase
+      .from('campaigns')
+      .select('status, mtd_spend')
+      .eq('ad_account_id', adAccount)
+      .then(({ data }) => {
+        const rows = data ?? [];
+        const mtdSpend = rows.reduce((s, r) => s + parseFloat(String(r.mtd_spend ?? 0)), 0);
+        const activeCampaigns = rows.filter((r) => r.status === 'ACTIVE').length;
+        setStats({ mtdSpend, activeCampaigns });
+      });
+  }, [location?.adAccountId, refreshMsg?.kind]);
 
   async function onRefreshMeta() {
     if (!supabase || !clientId || !locId) return;
@@ -214,11 +234,18 @@ export function LocationDetail() {
         <div className="row gap-24" style={{ paddingTop: 8, borderTop: '1px solid var(--border)' }}>
           <div className="stack gap-2">
             <span className="meta">Spend MTD</span>
-            <span style={{ fontWeight: 500, fontSize: 18 }}>{location.mtdSpend}</span>
+            <span style={{ fontWeight: 500, fontSize: 18 }}>
+              ${(stats?.mtdSpend ?? 0).toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}
+            </span>
           </div>
           <div className="stack gap-2">
             <span className="meta">Active campaigns</span>
-            <span style={{ fontWeight: 500, fontSize: 18 }}>{location.activeCampaigns}</span>
+            <span style={{ fontWeight: 500, fontSize: 18 }}>
+              {stats?.activeCampaigns ?? 0}
+            </span>
           </div>
           <div className="stack gap-2">
             <span className="meta">Posts / wk</span>

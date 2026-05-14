@@ -56,7 +56,13 @@ export function Sidebar({ prefix }: Props) {
       </div>
 
       <div className="side-nav">
-        {ROUTES.filter((r) => !r.hidden).map((r) => {
+        {ROUTES.filter((r) => {
+          if (r.hidden) return false;
+          // Hide Design System section inside a real workspace — it's
+          // dev-only design reference, not for end users.
+          if (workspace && r.section === 'design-system') return false;
+          return true;
+        }).map((r) => {
           const showHeader = r.section !== currentSection;
           if (showHeader) currentSection = r.section;
           const label = r.labelByMode?.[mode] ?? r.label;
