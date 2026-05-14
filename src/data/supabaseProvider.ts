@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { requireSupabase } from '../auth/supabaseClient';
 import { mockDataProvider } from './mockProvider';
 import type { DataProvider } from './provider';
 import type {
@@ -12,23 +12,29 @@ import type {
 } from './types';
 
 /**
- * Factory for the Supabase-backed DataProvider. No top-level side effects
- * — env check and createClient() only happen when this is called, which
- * means importing this module is free even when we're using the mock.
+ * Factory for the Supabase-backed DataProvider. Uses the singleton
+ * Supabase client from src/auth/supabaseClient.ts so it shares auth
+ * state with the AuthProvider — the user's JWT flows automatically
+ * into every query and RLS sees the authenticated user.
  *
- * Spreads the mock provider first so any method whose table hasn't been
- * migrated yet still returns fixture data — methods defined below override
- * the mock for tables that now live in Postgres.
+ * Spreads the mock provider first so any method whose table hasn't
+ * been migrated yet still returns fixture data — methods defined
+ * below override the mock for tables that now live in Postgres.
+ *
+ * Workspace scoping is handled by RLS (workspace_members membership
+ * is checked in the policy), so the queries don't need to filter
+ * explicitly. If multi-workspace switching is added later, this
+ * factory should take a workspaceId and add `.eq('workspace_id', …)`.
  */
+let _provider: DataProvider | null = null;
+export function getSupabaseProvider(): DataProvider {
+  if (_provider) return _provider;
+  _provider = createSupabaseDataProvider();
+  return _provider;
+}
+
 export function createSupabaseDataProvider(): DataProvider {
-  const URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-  const KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
-  if (!URL || !KEY) {
-    throw new Error(
-      'Supabase env vars missing — set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in .env.local',
-    );
-  }
-  const supabase = createClient(URL, KEY);
+  const supabase = requireSupabase();
 
   return {
     ...mockDataProvider,
