@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Navigate, Route, Routes, useParams } from 'react-router-dom';
-import { AppStateProvider } from './shell/AppState';
+import { AppStateProvider, useAppState } from './shell/AppState';
 import { AppShell } from './shell/AppShell';
 import { AuthProvider, useAuth } from './auth/AuthProvider';
 import { supabase } from './auth/supabaseClient';
@@ -10,6 +10,7 @@ import { getSupabaseProvider } from './data/supabaseProvider';
 import type { Workspace } from './data/types';
 import { Login } from './views/Login';
 import { LiveOnboard } from './views/LiveOnboard';
+import { WorkspaceProvider } from './workspace/WorkspaceProvider';
 
 /**
  * Top-level router.
@@ -68,17 +69,34 @@ function OnboardGate() {
   return <LiveOnboard />;
 }
 
-/** /app/:slug/* — auth-gate, then mount AppShell with the supabase provider. */
+/** /app/:slug/* — auth-gate, look up the workspace, hand off to AppShell. */
 function AppGate() {
   const auth = useAuth();
   const { slug } = useParams();
+  const workspaces = useWorkspaces();
+  const { set: setAppState } = useAppState();
+
+  const workspace = workspaces?.find((w) => w.slug === slug);
+
+  // Sync the workspace's mode into AppState so view-level `mode` reads
+  // (sidebar labels, Overview "All clients/locations") stay consistent
+  // with the workspace.
+  useEffect(() => {
+    if (workspace) setAppState({ mode: workspace.mode });
+  }, [workspace?.id, workspace?.mode, setAppState]);
+
   if (auth.loading) return <LoadingScreen />;
   if (!auth.user) return <Navigate to="/" replace />;
   if (!slug) return <Navigate to="/" replace />;
+  if (workspaces === null) return <LoadingScreen />;
+  if (!workspace) return <Navigate to="/" replace />;
+
   return (
-    <DataProviderProvider provider={getSupabaseProvider()}>
-      <AppShell prefix={`/app/${slug}`} />
-    </DataProviderProvider>
+    <WorkspaceProvider workspace={workspace}>
+      <DataProviderProvider provider={getSupabaseProvider()}>
+        <AppShell prefix={`/app/${slug}`} />
+      </DataProviderProvider>
+    </WorkspaceProvider>
   );
 }
 

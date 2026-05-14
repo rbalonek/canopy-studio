@@ -42,6 +42,8 @@ export type RouteDef = {
   ai?: boolean;
   /** Hide the topbar when this route is active (sidebar still shows). */
   full?: boolean;
+  /** Hide from the sidebar nav — route still resolves, just not listed. */
+  hidden?: boolean;
 };
 
 export const SECTION_LABELS: Record<SidebarSection, string> = {
@@ -62,7 +64,7 @@ export const ROUTES: RouteDef[] = [
 
   { id: 'overview',      subpath: '',              label: 'Overview',          icon: 'home',     section: 'workspace' },
   { id: 'clients',       subpath: 'clients',       label: 'Clients',           labelByMode: { business: 'Locations' }, icon: 'users', section: 'workspace' },
-  { id: 'client-detail', subpath: 'clients/:id',   navTo: 'clients/acme',      label: 'Client Detail', labelByMode: { business: 'Location Detail' }, icon: 'users', section: 'workspace' },
+  { id: 'client-detail', subpath: 'clients/:id',   navTo: 'clients/acme',      label: 'Client Detail', labelByMode: { business: 'Location Detail' }, icon: 'users', section: 'workspace', hidden: true },
   { id: 'ad-perf',       subpath: 'ad-performance', label: 'Ad Performance',   icon: 'chart',    section: 'workspace' },
   { id: 'calendar',      subpath: 'calendar',      label: 'Content Calendar',  icon: 'calendar', section: 'workspace' },
   { id: 'ad-studio',     subpath: 'ad-studio',     label: 'Ad Studio',         icon: 'sparkles', section: 'workspace', ai: true },

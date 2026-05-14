@@ -1,14 +1,33 @@
 import { Fragment } from 'react';
 import { NavLink } from 'react-router-dom';
+import { useAuth } from '../auth/AuthProvider';
 import { Icon } from '../components/Icon';
 import { ROUTES, SECTION_LABELS, routePath, type SidebarSection } from '../routes';
+import { useWorkspace } from '../workspace/WorkspaceProvider';
 import { useAppState } from './AppState';
 
 type Props = { prefix: string };
 
 export function Sidebar({ prefix }: Props) {
   const { state, set } = useAppState();
+  const auth = useAuth();
+  const workspace = useWorkspace();
   const { mode, sidebarCollapsed: collapsed } = state;
+
+  const displayName =
+    (typeof auth.user?.user_metadata?.display_name === 'string'
+      ? auth.user.user_metadata.display_name
+      : null) ??
+    auth.user?.email?.split('@')[0] ??
+    'You';
+  const initials = displayName
+    .split(/\s+/)
+    .map((p) => p[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
+  const role = workspace && auth.user?.id === workspace.ownerId ? 'Owner' : workspace ? 'Member' : null;
 
   let currentSection: SidebarSection | null = null;
 
@@ -37,7 +56,7 @@ export function Sidebar({ prefix }: Props) {
       </div>
 
       <div className="side-nav">
-        {ROUTES.map((r) => {
+        {ROUTES.filter((r) => !r.hidden).map((r) => {
           const showHeader = r.section !== currentSection;
           if (showHeader) currentSection = r.section;
           const label = r.labelByMode?.[mode] ?? r.label;
@@ -86,12 +105,24 @@ export function Sidebar({ prefix }: Props) {
                 fontSize: 11,
               }}
             >
-              JR
+              {initials || '?'}
             </div>
-            <div className="stack" style={{ flex: 1 }}>
-              <div style={{ color: 'var(--fg)' }}>Jordan Reyes</div>
-              <div className="meta">Owner · Starter</div>
+            <div className="stack" style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ color: 'var(--fg)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {displayName}
+              </div>
+              {role && <div className="meta">{role}</div>}
             </div>
+            {auth.user && (
+              <button
+                className="btn ghost sm"
+                onClick={() => auth.signOut()}
+                title="Sign out"
+                style={{ padding: 4 }}
+              >
+                <Icon name="link" size={12} />
+              </button>
+            )}
           </div>
         </div>
       )}
