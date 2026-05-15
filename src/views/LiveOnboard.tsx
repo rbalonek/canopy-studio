@@ -32,6 +32,8 @@ export function LiveOnboard() {
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [scraping, setScraping] = useState(false);
+  const [scrapeStatus, setScrapeStatus] = useState<string | null>(null);
 
   async function persist() {
     if (!auth.user || !supabase) {
@@ -92,6 +94,7 @@ export function LiveOnboard() {
 
     // 3. First client (best-effort; if it fails, we still have the
     // workspace so the user can add clients later).
+    let createdClientId: string | null = null;
     if (clientName.trim()) {
       const clientId = `${slugify(clientName)}-${randomSuffix()}`;
       const { error: cErr } = await supabase.from('clients').insert({
@@ -105,6 +108,37 @@ export function LiveOnboard() {
       });
       if (cErr) {
         console.warn('Failed to create first client:', cErr.message);
+      } else {
+        createdClientId = clientId;
+      }
+    }
+
+    // 4. Kick off the website scraper if a URL was provided. Best-effort
+    // — failure here doesn't block onboarding completion. The result
+    // lands in scraped_pages + scraped_domains for the Brand Intelligence
+    // surfaces and the future Ad Studio briefs.
+    if (createdClientId && clientWebsite.trim()) {
+      setScraping(true);
+      try {
+        const { data: scrapeData, error: scrapeErr } = await supabase.functions.invoke(
+          'scrape-client',
+          { body: { client_id: createdClientId, url: clientWebsite.trim() } },
+        );
+        if (scrapeErr) {
+          setScrapeStatus(`Scrape failed: ${scrapeErr.message}`);
+        } else if (scrapeData?.ok) {
+          setScrapeStatus(
+            `Scraped ${scrapeData.pages_scraped} page${
+              scrapeData.pages_scraped === 1 ? '' : 's'
+            } from ${clientWebsite}`,
+          );
+        } else {
+          setScrapeStatus(scrapeData?.error ?? 'Scrape returned no pages');
+        }
+      } catch (e) {
+        setScrapeStatus(`Scrape failed: ${(e as Error).message}`);
+      } finally {
+        setScraping(false);
       }
     }
 
@@ -172,7 +206,10 @@ export function LiveOnboard() {
             <DoneStep
               workspaceName={workspaceName}
               clientName={clientName}
+              clientWebsite={clientWebsite}
               submitting={submitting}
+              scraping={scraping}
+              scrapeStatus={scrapeStatus}
               error={error}
               onBack={() => setStep(3)}
               onFinish={onFinish}
@@ -411,14 +448,20 @@ function ClientStep({
 function DoneStep({
   workspaceName,
   clientName,
+  clientWebsite,
   submitting,
+  scraping,
+  scrapeStatus,
   error,
   onBack,
   onFinish,
 }: {
   workspaceName: string;
   clientName: string;
+  clientWebsite: string;
   submitting: boolean;
+  scraping: boolean;
+  scrapeStatus: string | null;
   error: string | null;
   onBack: () => void;
   onFinish: () => void;
@@ -440,7 +483,23 @@ function DoneStep({
           ''
         )}
         . Hit finish to enter your workspace.
+        {clientWebsite.trim() && (
+          <>
+            {' '}
+            We'll scrape <strong>{clientWebsite}</strong> for brand context after finish.
+          </>
+        )}
       </div>
+      {scraping && (
+        <div className="banner" style={{ justifyContent: 'center' }}>
+          ◌ Scraping {clientWebsite}… this can take 10–20 seconds
+        </div>
+      )}
+      {!scraping && scrapeStatus && (
+        <div className="banner" style={{ justifyContent: 'center' }}>
+          ✓ {scrapeStatus}
+        </div>
+      )}
       {error && (
         <div
           className="banner"
@@ -450,11 +509,15 @@ function DoneStep({
         </div>
       )}
       <div className="row gap-8">
-        <button className="btn ghost" disabled={submitting} onClick={onBack}>
+        <button className="btn ghost" disabled={submitting || scraping} onClick={onBack}>
           ← Back
         </button>
-        <button className="btn primary" disabled={submitting} onClick={onFinish}>
-          {submitting ? 'Creating…' : 'Finish'}
+        <button
+          className="btn primary"
+          disabled={submitting || scraping}
+          onClick={onFinish}
+        >
+          {submitting ? 'Creating…' : scraping ? 'Scraping…' : 'Finish'}
         </button>
       </div>
     </div>
