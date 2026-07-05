@@ -21,6 +21,7 @@ import { CORS, json } from '../_shared/cors.ts';
 import { serviceClient, type ServiceClient } from '../_shared/auth.ts';
 import { invokeInternal, isInternalCall } from '../_shared/internal.ts';
 import { loadTaskSettings, totalStepsFor } from '../_shared/ai/orchestrator.ts';
+import { settingsTaskFor } from '../_shared/ai/taskSpecs.ts';
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
@@ -57,6 +58,9 @@ async function dispatch(task: string): Promise<void> {
     case 'analysis_all':
       await analysisAll();
       return;
+    case 'reports_due':
+      await reportsDue();
+      return;
     default:
       console.error(`[cron-dispatch] unknown task: ${task}`);
   }
@@ -68,7 +72,7 @@ async function enqueueSystemJob(
   service: ServiceClient,
   args: { type: string; workspaceId: string; clientId?: string; input?: Record<string, unknown> },
 ): Promise<void> {
-  const settings = await loadTaskSettings(service, args.workspaceId, args.type);
+  const settings = await loadTaskSettings(service, args.workspaceId, settingsTaskFor(args.type));
   const { data: jobRow, error } = await service
     .from('jobs')
     .insert({
@@ -137,6 +141,37 @@ async function refreshAll(): Promise<void> {
       console.error(`[cron-dispatch] refresh ${clientId} failed (${resp.status}): ${body.slice(0, 300)}`);
     } else {
       console.log(`[cron-dispatch] refreshed ${clientId}: ${body.slice(0, 200)}`);
+    }
+  });
+}
+
+/** Fires the report settings due today: daily always, weekly on Mondays,
+ * monthly on the 1st. Runs at 07:00 UTC, after the 06:00 refresh, so
+ * yesterday's metrics are in. */
+async function reportsDue(): Promise<void> {
+  const service = serviceClient();
+  const now = new Date();
+  const due: string[] = ['daily'];
+  if (now.getUTCDay() === 1) due.push('weekly');
+  if (now.getUTCDate() === 1) due.push('monthly');
+
+  const { data } = await service
+    .from('report_settings')
+    .select('id, workspace_id, client_id, cadence')
+    .eq('enabled', true)
+    .in('cadence', due);
+
+  console.log(`[cron-dispatch] reports_due (${due.join(', ')}): ${data?.length ?? 0} report(s)`);
+  await runWithConcurrency((data ?? []) as any[], CONCURRENCY, async (rs) => {
+    try {
+      await enqueueSystemJob(service, {
+        type: 'send_report',
+        workspaceId: rs.workspace_id as string,
+        clientId: rs.client_id as string,
+        input: { report_settings_id: rs.id },
+      });
+    } catch (e) {
+      console.error(`[cron-dispatch] report enqueue failed for ${rs.id}:`, e);
     }
   });
 }

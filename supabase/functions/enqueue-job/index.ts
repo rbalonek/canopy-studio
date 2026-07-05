@@ -15,7 +15,7 @@ import {
   serviceClient,
 } from '../_shared/auth.ts';
 import { invokeInternal } from '../_shared/internal.ts';
-import { isKnownJobType } from '../_shared/ai/taskSpecs.ts';
+import { isKnownJobType, settingsTaskFor } from '../_shared/ai/taskSpecs.ts';
 import { loadTaskSettings, totalStepsFor } from '../_shared/ai/orchestrator.ts';
 
 interface EnqueueRequest {
@@ -55,7 +55,7 @@ Deno.serve(async (req) => {
     }
 
     const service = serviceClient();
-    const settings = await loadTaskSettings(service, workspaceId, body.type);
+    const settings = await loadTaskSettings(service, workspaceId, settingsTaskFor(body.type));
 
     const { data: jobRow, error: insertErr } = await service
       .from('jobs')

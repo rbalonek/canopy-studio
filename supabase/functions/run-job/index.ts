@@ -24,7 +24,7 @@
 import { CORS, json } from '../_shared/cors.ts';
 import { serviceClient } from '../_shared/auth.ts';
 import { invokeInternal, isInternalCall } from '../_shared/internal.ts';
-import { getSpecBuilder, type JobRow } from '../_shared/ai/taskSpecs.ts';
+import { getSpecBuilder, settingsTaskFor, type JobRow } from '../_shared/ai/taskSpecs.ts';
 import { loadTaskSettings, runOrchestratedStep } from '../_shared/ai/orchestrator.ts';
 
 // The Edge Runtime global for background tasks; typed loosely because the
@@ -102,7 +102,7 @@ async function processStep(jobId: string, step: number): Promise<void> {
     const builder = getSpecBuilder(job.type);
     if (!builder) throw new Error(`No handler for job type: ${job.type}`);
 
-    const settings = await loadTaskSettings(service, job.workspace_id, job.type);
+    const settings = await loadTaskSettings(service, job.workspace_id, settingsTaskFor(job.type));
     const spec = await builder(service, job);
 
     const outcome = await runOrchestratedStep({

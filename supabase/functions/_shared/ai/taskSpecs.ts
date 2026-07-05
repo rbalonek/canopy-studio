@@ -6,7 +6,7 @@
 
 // deno-lint-ignore-file no-explicit-any
 import type { ServiceClient } from '../auth.ts';
-import { notifyWorkspace } from '../notify.ts';
+import { notifyWorkspace, sendEmail, sendSlack } from '../notify.ts';
 import { landingPageSection } from '../scrape.ts';
 import type { OrchestratedPromptSpec } from './orchestrator.ts';
 import { loadSkills } from './orchestrator.ts';
@@ -793,6 +793,239 @@ IMPORTANT: Output must be valid JSON only. Do NOT include any surrounding commen
   };
 };
 
+/** send_report — roll up the period's campaign_metrics_daily, write the
+ * narrative through the orchestrator (report_summary settings + skills),
+ * render HTML, deliver via the workspace connectors, log sent_reports.
+ * Skips delivery when the period has no data (a refresh gap shouldn't
+ * email a client an empty report). */
+const sendReport: SpecBuilder = async (service, job) => {
+  const settingsId = job.input?.report_settings_id as string | undefined;
+  if (!settingsId) throw new Error('send_report requires input.report_settings_id');
+
+  const { data: rs } = await service
+    .from('report_settings')
+    .select('id, workspace_id, client_id, cadence, channel, recipients, enabled')
+    .eq('id', settingsId)
+    .maybeSingle();
+  if (!rs) throw new Error('Report settings not found');
+  const clientId = rs.client_id as string;
+  const cadence = rs.cadence as 'daily' | 'weekly' | 'monthly';
+
+  // Period: full days only — "yesterday" is the newest complete day.
+  const yesterday = new Date(Date.now() - 86_400_000);
+  let periodStart: Date;
+  let periodEnd = yesterday;
+  if (cadence === 'daily') {
+    periodStart = yesterday;
+  } else if (cadence === 'weekly') {
+    periodStart = new Date(yesterday.getTime() - 6 * 86_400_000);
+  } else {
+    const firstOfThisMonth = new Date(Date.UTC(yesterday.getUTCFullYear(), yesterday.getUTCMonth(), 1));
+    periodEnd = new Date(firstOfThisMonth.getTime() - 86_400_000);
+    periodStart = new Date(Date.UTC(periodEnd.getUTCFullYear(), periodEnd.getUTCMonth(), 1));
+  }
+  const startStr = periodStart.toISOString().slice(0, 10);
+  const endStr = periodEnd.toISOString().slice(0, 10);
+
+  const [{ data: clientRow }, { data: metrics }, { data: campaigns }, skills] = await Promise.all([
+    service.from('clients').select('name').eq('id', clientId).maybeSingle(),
+    service
+      .from('campaign_metrics_daily')
+      .select('campaign_id, date, spend, impressions, clicks, results, result_type')
+      .eq('client_id', clientId)
+      .gte('date', startStr)
+      .lte('date', endStr),
+    service.from('campaigns').select('id, name, strategy').eq('client_id', clientId),
+    loadSkills(service, job.workspace_id, 'report_summary'),
+  ]);
+
+  const clientName = (clientRow?.name as string) ?? 'Client';
+  const nameById = new Map((campaigns ?? []).map((c: any) => [c.id as string, c]));
+
+  // Roll up per campaign.
+  const perCampaign = new Map<
+    string,
+    { name: string; strategy: string | null; spend: number; clicks: number; impressions: number; results: number; resultType: string | null }
+  >();
+  for (const m of (metrics ?? []) as any[]) {
+    const c = nameById.get(m.campaign_id as string);
+    const agg = perCampaign.get(m.campaign_id) ?? {
+      name: (c?.name as string) ?? m.campaign_id,
+      strategy: (c?.strategy as string | null) ?? null,
+      spend: 0,
+      clicks: 0,
+      impressions: 0,
+      results: 0,
+      resultType: (m.result_type as string | null) ?? null,
+    };
+    agg.spend += Number(m.spend) || 0;
+    agg.clicks += Number(m.clicks) || 0;
+    agg.impressions += Number(m.impressions) || 0;
+    agg.results += Number(m.results) || 0;
+    perCampaign.set(m.campaign_id, agg);
+  }
+  const rollup = Array.from(perCampaign.values())
+    .filter((r) => r.spend > 0 || r.results > 0)
+    .sort((a, b) => b.spend - a.spend);
+  const totals = rollup.reduce(
+    (t, r) => ({
+      spend: t.spend + r.spend,
+      clicks: t.clicks + r.clicks,
+      impressions: t.impressions + r.impressions,
+      results: t.results + r.results,
+    }),
+    { spend: 0, clicks: 0, impressions: 0, results: 0 },
+  );
+
+  const periodLabel =
+    cadence === 'daily' ? endStr : `${startStr} → ${endStr}`;
+  const subject = `${clientName} — ${cadence} ad report (${periodLabel})`;
+
+  // No data → skip delivery entirely (finalize handles it via a flag).
+  const hasData = rollup.length > 0;
+
+  return {
+    system:
+      'You are a marketing analyst writing a short, client-friendly performance report. Plain language, no jargon, no invented numbers — only what is in the data. Always respond with valid JSON.' +
+      skillsBlock(skills),
+    user: `Write the narrative for a ${cadence} ad performance report.
+
+## CLIENT
+${clientName}
+
+## PERIOD
+${periodLabel}
+
+## DATA (per campaign, ${cadence} totals)
+${JSON.stringify({ totals, campaigns: rollup }, null, 2)}
+
+Remember the campaign "strategy" semantics: Lead Gen is judged on cost per lead, warm-up campaigns (ATC/VC/Traffic/Video) on engagement — do not criticize warm-ups for not converting — and Purchase/Sales on ROAS.
+
+Return valid JSON:
+{
+  "headline": "One-sentence topline a client understands",
+  "summary": "2-4 sentence narrative of the period",
+  "highlights": ["2-4 specific positive callouts with numbers"],
+  "watchouts": ["0-3 things to keep an eye on, phrased constructively"]
+}`,
+    reviewInstructions:
+      'Check every number quoted matches the data, the tone is client-friendly (no internal jargon), and warm-up campaigns are not criticized for lacking conversions.',
+    json: true,
+    llmOptions: { temperature: 0.4 },
+    finalize: async (narrative: any) => {
+      if (!hasData) {
+        return { skipped: true, reason: 'No campaign activity in the period' };
+      }
+
+      const html = renderReportHtml({
+        clientName,
+        cadence,
+        periodLabel,
+        totals,
+        rollup,
+        narrative,
+      });
+
+      const channel = rs.channel as 'email' | 'slack' | 'both';
+      const recipients = (rs.recipients as string[] | null) ?? [];
+      let sendError: string | undefined;
+
+      if ((channel === 'email' || channel === 'both') && recipients.length) {
+        const r = await sendEmail(service, {
+          workspaceId: job.workspace_id,
+          kind: 'report',
+          to: recipients,
+          subject,
+          html,
+        });
+        if (!r.ok) sendError = r.error;
+      }
+      if (channel === 'slack' || channel === 'both') {
+        const highlights = (narrative?.highlights ?? []).map((h: string) => `• ${h}`).join('\n');
+        const r = await sendSlack(service, {
+          workspaceId: job.workspace_id,
+          kind: 'report',
+          text: `*${subject}*\n${narrative?.headline ?? ''}\n${narrative?.summary ?? ''}\n${highlights}`,
+        });
+        if (!r.ok) sendError = sendError ?? r.error;
+      }
+
+      await service.from('sent_reports').insert({
+        report_settings_id: rs.id,
+        workspace_id: job.workspace_id,
+        client_id: clientId,
+        cadence,
+        period_start: startStr,
+        period_end: endStr,
+        subject,
+        body_html: html,
+        status: sendError ? 'failed' : 'sent',
+        error: sendError ?? null,
+      });
+      if (!sendError) {
+        await service
+          .from('report_settings')
+          .update({ last_sent_at: new Date().toISOString() })
+          .eq('id', rs.id);
+      }
+      return { ...narrative, sent: !sendError, error: sendError ?? null, subject };
+    },
+  };
+};
+
+function renderReportHtml(args: {
+  clientName: string;
+  cadence: string;
+  periodLabel: string;
+  totals: { spend: number; clicks: number; impressions: number; results: number };
+  rollup: Array<{ name: string; strategy: string | null; spend: number; clicks: number; results: number; resultType: string | null }>;
+  narrative: any;
+}): string {
+  const { clientName, cadence, periodLabel, totals, rollup, narrative } = args;
+  const money = (n: number) => `$${n.toFixed(2).replace(/\.00$/, '')}`;
+  const esc = (s: unknown) =>
+    String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  const rows = rollup
+    .map(
+      (r) => `<tr>
+  <td style="padding:8px;border-bottom:1px solid #eee;">${esc(r.name)}${r.strategy ? `<br><span style="color:#888;font-size:12px;">${esc(r.strategy)}</span>` : ''}</td>
+  <td style="padding:8px;border-bottom:1px solid #eee;text-align:right;">${money(r.spend)}</td>
+  <td style="padding:8px;border-bottom:1px solid #eee;text-align:right;">${r.clicks.toLocaleString()}</td>
+  <td style="padding:8px;border-bottom:1px solid #eee;text-align:right;">${r.results.toLocaleString()}${r.resultType ? `<br><span style="color:#888;font-size:12px;">${esc(r.resultType.replace(/_/g, ' '))}</span>` : ''}</td>
+</tr>`,
+    )
+    .join('\n');
+
+  const list = (items: string[] | undefined) =>
+    (items ?? []).map((i) => `<li style="margin-bottom:4px;">${esc(i)}</li>`).join('');
+
+  return `<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;max-width:640px;margin:0 auto;color:#1a1a1a;">
+  <h2 style="margin-bottom:4px;">${esc(clientName)} — ${esc(cadence)} ad report</h2>
+  <p style="color:#666;margin-top:0;">${esc(periodLabel)}</p>
+  <p style="font-size:16px;font-weight:600;">${esc(narrative?.headline)}</p>
+  <p>${esc(narrative?.summary)}</p>
+  <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:14px;">
+    <tr style="text-align:left;color:#888;font-size:12px;text-transform:uppercase;">
+      <th style="padding:8px;border-bottom:2px solid #ddd;">Campaign</th>
+      <th style="padding:8px;border-bottom:2px solid #ddd;text-align:right;">Spend</th>
+      <th style="padding:8px;border-bottom:2px solid #ddd;text-align:right;">Clicks</th>
+      <th style="padding:8px;border-bottom:2px solid #ddd;text-align:right;">Results</th>
+    </tr>
+    ${rows}
+    <tr style="font-weight:600;">
+      <td style="padding:8px;">Total</td>
+      <td style="padding:8px;text-align:right;">${money(totals.spend)}</td>
+      <td style="padding:8px;text-align:right;">${totals.clicks.toLocaleString()}</td>
+      <td style="padding:8px;text-align:right;">${totals.results.toLocaleString()}</td>
+    </tr>
+  </table>
+  ${narrative?.highlights?.length ? `<h3 style="margin-bottom:6px;">Highlights</h3><ul style="margin-top:0;padding-left:20px;">${list(narrative.highlights)}</ul>` : ''}
+  ${narrative?.watchouts?.length ? `<h3 style="margin-bottom:6px;">Keeping an eye on</h3><ul style="margin-top:0;padding-left:20px;">${list(narrative.watchouts)}</ul>` : ''}
+  <p style="color:#999;font-size:12px;margin-top:24px;">Sent by CanopyStudio.</p>
+</div>`;
+}
+
 /** test_prompt — Phase-0 plumbing check. Exercises the full pipeline
  * (settings lookup, skills injection, collaboration chaining, JSON
  * parsing, usage rows) with a trivial marketing prompt. */
@@ -820,6 +1053,7 @@ const BUILDERS: Record<string, SpecBuilder> = {
   website_analysis: websiteAnalysis,
   competitor_analysis: competitorAnalysis,
   account_analysis: accountAnalysis,
+  send_report: sendReport,
 };
 
 export function getSpecBuilder(type: string): SpecBuilder | null {
@@ -828,4 +1062,11 @@ export function getSpecBuilder(type: string): SpecBuilder | null {
 
 export function isKnownJobType(type: string): boolean {
   return !!BUILDERS[type];
+}
+
+/** Which ai_settings row governs a job type. Usually 1:1; send_report
+ * uses the 'report_summary' settings (the LLM part of a report is the
+ * narrative — sending isn't an AI mode). */
+export function settingsTaskFor(type: string): string {
+  return type === 'send_report' ? 'report_summary' : type;
 }
