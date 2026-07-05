@@ -14,6 +14,7 @@ import {
   buildUserPrompt,
   buildUserPromptWithDirection,
   formatClientContext,
+  skillsBlock,
   systemPromptWithSkills,
   type BrandContext,
   type CampaignContext,
@@ -330,6 +331,174 @@ Return valid JSON: { "value": "..." }`,
   };
 };
 
+/** website_analysis — scraped pages → brand profile. The prompt is the
+ * donor app's analyzeWebsite mission, with dos/donts split into the two
+ * fields Canopy stores. finalize() upserts brand_profiles, folding in
+ * the scraper's design signals and skipping human-edited fields. */
+const websiteAnalysis: SpecBuilder = async (service, job) => {
+  if (!job.client_id) throw new Error('website_analysis requires a client_id');
+  const clientId = job.client_id;
+
+  const [{ data: pages }, { data: domainRow }, skills, { data: clientRow }] = await Promise.all([
+    service
+      .from('scraped_pages')
+      .select('url, title, content')
+      .eq('client_id', clientId)
+      .order('word_count', { ascending: false })
+      .limit(12),
+    service
+      .from('scraped_domains')
+      .select('domain, raw_palette, raw_fonts, logo_url')
+      .eq('client_id', clientId)
+      .order('last_crawled_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    loadSkills(service, job.workspace_id, 'website_analysis'),
+    service.from('clients').select('name, website').eq('id', clientId).maybeSingle(),
+  ]);
+
+  if (!pages?.length) {
+    throw new Error('No scraped pages for this client yet — run a website scrape first.');
+  }
+
+  const url =
+    (job.input?.url as string | undefined) ??
+    (clientRow?.website as string | undefined) ??
+    (domainRow?.domain as string | undefined) ??
+    'unknown';
+
+  // Budget the content across pages (the donor truncates at 30k chars).
+  const MAX_TOTAL = 28_000;
+  const perPage = Math.max(1500, Math.floor(MAX_TOTAL / pages.length));
+  const websiteContent = pages
+    .map(
+      (p: any) =>
+        `--- ${p.url}${p.title ? ` ("${p.title}")` : ''} ---\n${((p.content as string) ?? '').slice(0, perPage)}`,
+    )
+    .join('\n\n')
+    .slice(0, MAX_TOTAL);
+
+  return {
+    system:
+      'You are a brand analyst that extracts brand information from websites. Always respond with valid JSON.' +
+      skillsBlock(skills),
+    user: buildWebsiteAnalysisPrompt(websiteContent, url),
+    reviewInstructions:
+      'Check every field is grounded in the actual website content (no invented facts), the customer avatars are specific, and dos/donts are actionable single-line rules separated by newlines.',
+    json: true,
+    llmOptions: { temperature: 0.3 },
+    finalize: async (result: any) => {
+      const { data: existing } = await service
+        .from('brand_profiles')
+        .select('edited_fields')
+        .eq('client_id', clientId)
+        .maybeSingle();
+      const edited = (existing?.edited_fields as Record<string, boolean> | null) ?? {};
+
+      const analyzed: Record<string, unknown> = {
+        description: result?.company_description ?? null,
+        customer_avatars: result?.customer_avatars ?? null,
+        brand_voice: result?.brand_voice ?? null,
+        dos: result?.dos ?? null,
+        donts: result?.donts ?? null,
+        additional_notes: result?.additional_notes ?? null,
+        palette: domainRow?.raw_palette ?? null,
+        fonts: domainRow?.raw_fonts ?? null,
+        logo_url: domainRow?.logo_url ?? null,
+      };
+      // Human edits win: drop any field the user has customized.
+      for (const key of Object.keys(analyzed)) {
+        if (edited[key]) delete analyzed[key];
+      }
+
+      const { error } = await service.from('brand_profiles').upsert(
+        {
+          client_id: clientId,
+          ...analyzed,
+          analyzed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'client_id' },
+      );
+      if (error) throw new Error(`Failed to save brand profile: ${error.message}`);
+      return { ...result, saved: true, skipped_edited_fields: Object.keys(edited) };
+    },
+  };
+};
+
+function buildWebsiteAnalysisPrompt(websiteContent: string, url: string): string {
+  return `You are an expert brand strategist and digital marketing analyst specializing in extracting actionable brand intelligence from website content. Your analysis will be used to create high-converting advertising campaigns.
+
+## WEBSITE BEING ANALYZED
+URL: ${url}
+
+The content below was scraped from multiple pages of this website (home, about, services, etc.).
+
+## YOUR MISSION
+Extract comprehensive brand knowledge that a marketing copywriter can immediately use to create compelling Google Ads and META (Facebook/Instagram) advertising campaigns.
+
+## WHAT TO EXTRACT
+
+### 1. Company Overview & Positioning
+- What exactly does this company do? Be specific about products/services
+- What is their unique selling proposition (USP)?
+- What market/industry do they serve?
+- What makes them different from competitors?
+- What problems do they solve?
+
+### 2. Target Audience Intelligence
+- Who are their ideal customers? (Demographics: age, location, income, profession)
+- What psychographics define their audience? (Values, interests, lifestyle)
+- What pain points and frustrations does the audience have?
+- What desires, goals, and aspirations drive them?
+- What objections might prevent them from buying?
+- What would trigger them to take action NOW?
+
+### 3. Brand Voice & Communication Style
+- How does the website communicate? (Tone: professional, casual, playful, authoritative, empathetic)
+- What personality comes through? (Innovative, trustworthy, bold, caring, luxurious, approachable)
+- What specific words, phrases, or terminology do they use repeatedly?
+- What emotions do they try to evoke?
+- What reading level and complexity is the copy written at?
+
+### 4. Key Messages & Value Propositions
+- What are the main benefits they highlight? (Not features, benefits)
+- What transformation do they promise customers?
+- What proof points, statistics, or credentials do they share?
+- What testimonials or case studies are mentioned?
+- What guarantees or risk-reversals do they offer?
+
+### 5. Brand Guidelines (Do's and Don'ts)
+- What communication style should always be maintained?
+- What topics or claims should be avoided?
+- Are there industry-specific compliance considerations?
+- What competitors should never be mentioned?
+- What messaging would feel "off-brand" for them?
+
+### 6. Marketing-Ready Insights
+- What emotional triggers could drive conversions?
+- What urgency or scarcity angles exist naturally?
+- What seasonal or timely opportunities exist?
+- What calls-to-action do they currently use?
+- What offers or promotions are mentioned?
+
+## WEBSITE CONTENT TO ANALYZE
+
+${websiteContent}
+
+## OUTPUT FORMAT
+Synthesize all findings into immediately actionable brand knowledge. Return your response as JSON:
+{
+  "company_description": "Comprehensive company description with positioning, USP, and what they do...",
+  "customer_avatars": "Detailed target audience analysis including demographics, psychographics, pain points, desires, objections, and buying triggers...",
+  "brand_voice": "Complete brand voice guide with tone, personality, key phrases, and communication style to emulate...",
+  "dos": "Things copy SHOULD always do for this brand — one rule per line...",
+  "donts": "Things copy must NEVER do for this brand — one rule per line...",
+  "additional_notes": "Marketing-ready insights including emotional triggers, proof points, CTAs, offers, and campaign angles...",
+  "sources": ["Website: ${url}"]
+}`;
+}
+
 /** test_prompt — Phase-0 plumbing check. Exercises the full pipeline
  * (settings lookup, skills injection, collaboration chaining, JSON
  * parsing, usage rows) with a trivial marketing prompt. */
@@ -354,6 +523,7 @@ const BUILDERS: Record<string, SpecBuilder> = {
   creative_directions: creativeDirections,
   expand_content: expandContent,
   regenerate_single: regenerateSingle,
+  website_analysis: websiteAnalysis,
 };
 
 export function getSpecBuilder(type: string): SpecBuilder | null {

@@ -164,7 +164,17 @@ async function scrape(
     }
   }
 
-  // --- 3. Roll up domain stats ---
+  // --- 3. Design signals (palette / fonts / logo) from the homepage ---
+  // Heuristic by nature — staged on the domain row for the
+  // website_analysis job to fold into brand_profiles as "detected".
+  let design: DesignSignals = { palette: [], fonts: [], logoUrl: null };
+  try {
+    design = await extractDesignSignals(base);
+  } catch (e) {
+    errors.push(`design signals: ${(e as Error).message}`);
+  }
+
+  // --- 4. Roll up domain stats ---
   await service.from('scraped_domains').upsert(
     {
       client_id: clientId,
@@ -173,6 +183,9 @@ async function scrape(
       sitemap_status: sitemapStatus,
       pages_discovered: discovered.size,
       pages_indexed: scrapedCount,
+      raw_palette: design.palette.length ? design.palette : null,
+      raw_fonts: design.fonts.length ? design.fonts : null,
+      logo_url: design.logoUrl,
       last_crawled_at: new Date().toISOString(),
     },
     { onConflict: 'client_id,domain' },
@@ -317,6 +330,136 @@ function sameDomain(u: string, base: URL): boolean {
   } catch {
     return false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Design-signal extraction (palette, fonts, logo)
+// ---------------------------------------------------------------------------
+
+interface DesignSignals {
+  palette: string[];
+  fonts: Array<{ family: string; source: 'google-fonts' | 'css' }>;
+  logoUrl: string | null;
+}
+
+// Generic CSS font keywords that aren't brand fonts.
+const GENERIC_FONTS = new Set([
+  'sans-serif', 'serif', 'monospace', 'cursive', 'fantasy', 'system-ui',
+  'inherit', 'initial', 'unset', '-apple-system', 'blinkmacsystemfont',
+  'segoe ui', 'arial', 'helvetica', 'helvetica neue', 'times new roman',
+  'ui-sans-serif', 'ui-serif', 'ui-monospace', 'var(--font-family)',
+]);
+
+/** Re-fetch the homepage unstripped (fetchAndParse removes header/nav —
+ * exactly where logos live) and mine it + up to 3 same-origin
+ * stylesheets for colors, font families, and a logo URL. */
+async function extractDesignSignals(base: URL): Promise<DesignSignals> {
+  const resp = await fetchWithTimeout(base.toString());
+  if (!resp.ok) return { palette: [], fonts: [], logoUrl: null };
+  const html = await resp.text();
+  const $ = cheerio.load(html);
+
+  // -- CSS sources: inline <style> blocks + first 3 same-origin sheets --
+  let css = '';
+  $('style').each((_: number, el: any) => {
+    css += $(el).text() + '\n';
+  });
+  const sheetUrls: string[] = [];
+  $('link[rel="stylesheet"][href]').each((_: number, el: any) => {
+    const href = $(el).attr('href');
+    if (!href) return;
+    try {
+      const abs = new URL(href, base);
+      if (abs.hostname === base.hostname) sheetUrls.push(abs.toString());
+    } catch {
+      // skip
+    }
+  });
+  for (const sheet of sheetUrls.slice(0, 3)) {
+    try {
+      const cssResp = await fetchWithTimeout(sheet, 6000);
+      if (cssResp.ok) css += (await cssResp.text()) + '\n';
+    } catch {
+      // skip slow/broken sheets
+    }
+  }
+
+  // -- Palette: hex color frequency, ignoring pure black/white/greys --
+  const counts = new Map<string, number>();
+  const themeColor = $('meta[name="theme-color"]').attr('content')?.trim();
+  const addColor = (raw: string, weight = 1) => {
+    let hex = raw.toLowerCase();
+    if (/^#[0-9a-f]{3}$/.test(hex)) {
+      hex = `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}`;
+    }
+    if (!/^#[0-9a-f]{6}$/.test(hex)) return;
+    const [r, g, b] = [hex.slice(1, 3), hex.slice(3, 5), hex.slice(5, 7)].map((h) =>
+      parseInt(h, 16),
+    );
+    const isGrey = Math.max(r, g, b) - Math.min(r, g, b) < 16;
+    if (isGrey) return;
+    counts.set(hex, (counts.get(hex) ?? 0) + weight);
+  };
+  if (themeColor?.startsWith('#')) addColor(themeColor, 20);
+  for (const m of css.matchAll(/#([0-9a-f]{6}|[0-9a-f]{3})\b/gi)) addColor(`#${m[1]}`);
+  const palette = Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([hex]) => hex);
+
+  // -- Fonts: Google Fonts links (high confidence) + font-family decls --
+  const fonts: DesignSignals['fonts'] = [];
+  const seenFamilies = new Set<string>();
+  $('link[href*="fonts.googleapis.com"]').each((_: number, el: any) => {
+    const href = $(el).attr('href') ?? '';
+    for (const m of href.matchAll(/family=([^&:;]+)/g)) {
+      const family = decodeURIComponent(m[1]).replace(/\+/g, ' ').split(':')[0].trim();
+      const key = family.toLowerCase();
+      if (family && !seenFamilies.has(key)) {
+        seenFamilies.add(key);
+        fonts.push({ family, source: 'google-fonts' });
+      }
+    }
+  });
+  for (const m of css.matchAll(/font-family\s*:\s*([^;}{]+)/gi)) {
+    const first = m[1].split(',')[0].replace(/["']/g, '').trim();
+    const key = first.toLowerCase();
+    if (first && !GENERIC_FONTS.has(key) && !seenFamilies.has(key) && fonts.length < 6) {
+      seenFamilies.add(key);
+      fonts.push({ family: first, source: 'css' });
+    }
+  }
+
+  // -- Logo: common selectors, header-first (donor assets.js approach) --
+  const logoSelectors = [
+    'img[class*="logo" i]', 'img[id*="logo" i]', 'img[alt*="logo" i]',
+    '.logo img', '#logo img', 'header a[href="/"] img', 'a[href="/"] img',
+    'header img', 'nav img',
+  ];
+  let logoUrl: string | null = null;
+  for (const sel of logoSelectors) {
+    const src = $(sel).first().attr('src') ?? $(sel).first().attr('data-src');
+    if (src) {
+      try {
+        logoUrl = new URL(src, base).toString();
+        break;
+      } catch {
+        // keep looking
+      }
+    }
+  }
+  if (!logoUrl) {
+    const icon = $('link[rel*="icon"]').first().attr('href');
+    if (icon) {
+      try {
+        logoUrl = new URL(icon, base).toString();
+      } catch {
+        // fine — no logo
+      }
+    }
+  }
+
+  return { palette, fonts: fonts.slice(0, 5), logoUrl };
 }
 
 async function fetchWithTimeout(url: string, ms = FETCH_TIMEOUT_MS): Promise<Response> {

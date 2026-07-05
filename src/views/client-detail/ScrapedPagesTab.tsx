@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../../auth/supabaseClient';
 import { Icon } from '../../components/Icon';
+import { enqueueJob } from '../../data/useJob';
+import { useWorkspace } from '../../workspace/WorkspaceProvider';
 
 type DomainRow = {
   id: string;
@@ -29,6 +31,7 @@ const HEALTH_PILL: Record<DomainRow['health'], string> = {
 };
 
 export function ScrapedPagesTab({ clientId }: { clientId: string }) {
+  const workspace = useWorkspace();
   const [domains, setDomains] = useState<DomainRow[] | null>(null);
   const [pages, setPages] = useState<PageRow[] | null>(null);
   const [website, setWebsite] = useState<string | null>(null);
@@ -83,8 +86,18 @@ export function ScrapedPagesTab({ clientId }: { clientId: string }) {
     }
     setMsg({
       kind: 'ok',
-      text: `Scraped ${data.pages_scraped} of ${data.pages_discovered} discovered pages.`,
+      text: `Scraped ${data.pages_scraped} of ${data.pages_discovered} discovered pages. Updating the brand profile…`,
     });
+    // Refresh the AI brand profile from the new content (best-effort;
+    // fields the user has edited are never overwritten).
+    if (workspace) {
+      enqueueJob({
+        type: 'website_analysis',
+        workspaceId: workspace.id,
+        clientId,
+        input: { url },
+      }).catch((e) => console.warn('Brand analysis enqueue failed:', e));
+    }
     refresh();
   }
 

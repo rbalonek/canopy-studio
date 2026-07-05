@@ -108,9 +108,10 @@ export interface OrchestratedPromptSpec {
   json: boolean;
   llmOptions?: LlmOptions;
   /** Optional post-processing applied by run-job to the final result
-   * (dedupe, reshaping) before it's stored on the jobs row. */
+   * (dedupe, reshaping, persisting to domain tables) before it's stored
+   * on the jobs row. May be async. */
   // deno-lint-ignore no-explicit-any
-  finalize?: (result: any) => any;
+  finalize?: (result: any) => any | Promise<any>;
 }
 
 export interface StepOutcome {
