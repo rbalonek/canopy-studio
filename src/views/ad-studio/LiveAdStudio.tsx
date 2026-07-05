@@ -484,7 +484,109 @@ export function LiveAdStudio({
             workspaceId={workspace.id}
             clientId={clientId}
           />
+          {generationId && medium !== 'GOOGLE_ADS' && !!results.meta && (
+            <PublishPanel generationId={generationId} hasLandingUrl={!!landingUrl.trim()} />
+          )}
         </>
+      )}
+    </div>
+  );
+}
+
+/** Step 4 (2B): create the saved generation in Meta — always PAUSED.
+ * Uses the first META primary text + headline; a human reviews and
+ * activates in Ads Manager. */
+function PublishPanel({
+  generationId,
+  hasLandingUrl,
+}: {
+  generationId: string;
+  hasLandingUrl: boolean;
+}) {
+  const [budget, setBudget] = useState(10);
+  const [confirming, setConfirming] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
+
+  async function publish() {
+    if (!supabase) return;
+    setPublishing(true);
+    setResult(null);
+    const { data, error } = await supabase.functions.invoke('publish-meta-ad', {
+      body: { generation_id: generationId, daily_budget_cents: Math.round(budget * 100) },
+    });
+    setPublishing(false);
+    setConfirming(false);
+    if (error || !data?.ok) {
+      setResult({ ok: false, text: error?.message ?? data?.error ?? 'Publish failed' });
+      return;
+    }
+    setResult({
+      ok: true,
+      text: `Created PAUSED in Meta (campaign ${data.campaign_id}). Review and activate in Ads Manager.`,
+    });
+  }
+
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <div className="card-pad row between" style={{ gap: 12, flexWrap: 'wrap' }}>
+        <div className="stack gap-2" style={{ maxWidth: 520 }}>
+          <div className="row gap-8">
+            <span className="pill gray" style={{ fontSize: 11 }}>
+              Step 4
+            </span>
+            <span className="h2">Create in Meta (paused)</span>
+          </div>
+          <span className="meta" style={{ fontSize: 11 }}>
+            Builds a real campaign, ad set, and ad from this copy — everything arrives PAUSED and
+            spends nothing until you activate it in Ads Manager. Requires a token with
+            ads_management for this ad account and a Facebook Page ID on the client.
+          </span>
+        </div>
+        <div className="row gap-8" style={{ alignItems: 'center' }}>
+          <label className="row gap-6" style={{ alignItems: 'center' }}>
+            <span className="meta">Daily budget $</span>
+            <input
+              type="number"
+              min={1}
+              value={budget}
+              onChange={(e) => setBudget(Number(e.target.value) || 1)}
+              style={{ ...fieldStyle, width: 90 }}
+              disabled={publishing}
+            />
+          </label>
+          {!confirming ? (
+            <button
+              className="btn primary"
+              disabled={publishing || !hasLandingUrl}
+              onClick={() => setConfirming(true)}
+              title={!hasLandingUrl ? 'Add a landing page URL in the brief first' : undefined}
+            >
+              Create in Meta (paused) →
+            </button>
+          ) : (
+            <>
+              <button className="btn primary" disabled={publishing} onClick={publish}>
+                {publishing ? 'Creating…' : `Confirm — $${budget}/day, PAUSED`}
+              </button>
+              <button className="btn ghost" disabled={publishing} onClick={() => setConfirming(false)}>
+                Cancel
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+      {result && (
+        <div
+          className="card-pad meta"
+          style={{
+            borderTop: '1px solid var(--border)',
+            color: result.ok ? undefined : 'var(--danger, #c33)',
+          }}
+        >
+          {result.ok ? '✓ ' : '⚠ '}
+          {result.text}
+        </div>
       )}
     </div>
   );
