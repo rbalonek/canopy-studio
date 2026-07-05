@@ -18,8 +18,9 @@
 
 // deno-lint-ignore-file no-explicit-any
 import { CORS, json } from '../_shared/cors.ts';
-import { serviceClient } from '../_shared/auth.ts';
+import { serviceClient, type ServiceClient } from '../_shared/auth.ts';
 import { invokeInternal, isInternalCall } from '../_shared/internal.ts';
+import { loadTaskSettings, totalStepsFor } from '../_shared/ai/orchestrator.ts';
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
 
@@ -53,9 +54,66 @@ async function dispatch(task: string): Promise<void> {
     case 'refresh_all':
       await refreshAll();
       return;
+    case 'analysis_all':
+      await analysisAll();
+      return;
     default:
       console.error(`[cron-dispatch] unknown task: ${task}`);
   }
+}
+
+/** Insert a job row (service role — cron has no user) and hand it to
+ * run-job, mirroring what enqueue-job does for browser callers. */
+async function enqueueSystemJob(
+  service: ServiceClient,
+  args: { type: string; workspaceId: string; clientId?: string; input?: Record<string, unknown> },
+): Promise<void> {
+  const settings = await loadTaskSettings(service, args.workspaceId, args.type);
+  const { data: jobRow, error } = await service
+    .from('jobs')
+    .insert({
+      workspace_id: args.workspaceId,
+      client_id: args.clientId ?? null,
+      type: args.type,
+      status: 'pending',
+      total_steps: totalStepsFor(settings.mode),
+      progress: 0,
+      progress_message: 'Queued (scheduled)',
+      input: args.input ?? {},
+    })
+    .select('id')
+    .single();
+  if (error || !jobRow) {
+    throw new Error(`job insert failed: ${error?.message}`);
+  }
+  const resp = await invokeInternal('run-job', { job_id: jobRow.id, step: 0 });
+  if (!resp.ok) throw new Error(`run-job handoff failed (${resp.status})`);
+}
+
+/** Weekly analysis for every client that has campaign data. */
+async function analysisAll(): Promise<void> {
+  const service = serviceClient();
+  const { data } = await service
+    .from('campaigns')
+    .select('client_id, clients!inner(workspace_id)');
+  const byClient = new Map<string, string>();
+  for (const row of (data ?? []) as any[]) {
+    byClient.set(row.client_id as string, row.clients.workspace_id as string);
+  }
+
+  console.log(`[cron-dispatch] analysis_all: ${byClient.size} client(s)`);
+  await runWithConcurrency(Array.from(byClient.entries()), CONCURRENCY, async ([clientId, workspaceId]) => {
+    try {
+      await enqueueSystemJob(service, {
+        type: 'account_analysis',
+        workspaceId,
+        clientId,
+      });
+      console.log(`[cron-dispatch] analysis queued for ${clientId}`);
+    } catch (e) {
+      console.error(`[cron-dispatch] analysis enqueue failed for ${clientId}:`, e);
+    }
+  });
 }
 
 /** Clients worth refreshing: any with a location ad account or a legacy

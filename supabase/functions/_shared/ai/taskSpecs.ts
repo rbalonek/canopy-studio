@@ -6,6 +6,7 @@
 
 // deno-lint-ignore-file no-explicit-any
 import type { ServiceClient } from '../auth.ts';
+import { notifyWorkspace } from '../notify.ts';
 import { landingPageSection } from '../scrape.ts';
 import type { OrchestratedPromptSpec } from './orchestrator.ts';
 import { loadSkills } from './orchestrator.ts';
@@ -613,6 +614,185 @@ Provide 4-6 comparison_rows and 3-5 gap_angles.`,
   };
 };
 
+/** account_analysis — campaign performance review → suggestions.
+ * The strategy rules are ported verbatim from ad-optimizer's
+ * analyzeAdPerformance (judge lead-gen on CPL, warm-ups on engagement,
+ * purchase on ROAS — always via campaign_strategy, never Meta's
+ * objective). Data comes from Supabase only; Meta is never called here.
+ * finalize() writes analyses + suggestions rows and pings connectors. */
+const accountAnalysis: SpecBuilder = async (service, job) => {
+  if (!job.client_id) throw new Error('account_analysis requires a client_id');
+  const clientId = job.client_id;
+
+  const since = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
+  const [clientCtx, { data: clientRow }, { data: campaigns }, { data: history }, competitorsRes, skills] =
+    await Promise.all([
+      loadBrandContext(service, clientId),
+      service.from('clients').select('name').eq('id', clientId).maybeSingle(),
+      service
+        .from('campaigns')
+        .select(
+          'id, ad_account_id, name, status, objective, strategy, daily_spend, mtd_spend, daily_results, daily_result_type, daily_cost_per_result, mtd_results, mtd_result_type, mtd_cost_per_result, impressions, clicks, cpc, cpm, ctr, reach, frequency, roas, last_refreshed_at',
+        )
+        .eq('client_id', clientId),
+      service
+        .from('campaign_metrics_daily')
+        .select('campaign_id, date, spend, results, result_type, clicks, impressions')
+        .eq('client_id', clientId)
+        .gte('date', since)
+        .order('date', { ascending: true }),
+      service
+        .from('competitors')
+        .select('domain, name, analysis')
+        .eq('client_id', clientId)
+        .not('analysis', 'is', null),
+      loadSkills(service, job.workspace_id, 'account_analysis'),
+    ]);
+
+  const activeCampaigns = (campaigns ?? []).filter(
+    (c: any) => Number(c.mtd_spend) > 0 || Number(c.daily_spend) > 0 || c.status === 'ACTIVE',
+  );
+  if (!activeCampaigns.length) {
+    throw new Error('No campaign data for this client yet — refresh from Meta first.');
+  }
+
+  const competitorNotes = ((competitorsRes.data ?? []) as any[])
+    .map((c) => `- ${c.name ?? c.domain}: ${c.analysis?.takeaway ?? c.analysis?.positioning_summary ?? ''}`)
+    .filter((line) => line.length > 4)
+    .join('\n');
+
+  const adData = {
+    client: { name: clientCtx.name, brand_context: clientCtx.company_description },
+    campaigns: activeCampaigns.map((c: any) => ({ ...c, campaign_strategy: c.strategy })),
+    daily_history_last_30_days: history ?? [],
+  };
+
+  return {
+    system:
+      'You are an expert digital marketing analyst specializing in META Ads optimization. Always respond with valid JSON.' +
+      skillsBlock(skills),
+    user: `Analyze the following ad performance data for the client "${clientCtx.name}" and provide actionable recommendations:
+
+${JSON.stringify(adData, null, 2)}
+
+IMPORTANT CONTEXT ABOUT CAMPAIGN STRATEGIES:
+
+Each campaign has a "campaign_strategy" field parsed from the campaign name. This is MORE ACCURATE than the META objective field. Use the campaign_strategy to determine how to evaluate performance:
+
+1. "Lead Generation" campaigns:
+   - Judge performance based on Cost Per Lead (CPL) against industry standards ($20-$100 for B2B, $5-$50 for local services)
+   - If you see "purchase" conversions on a lead campaign, this is META's pixel tracking multiple events - NOT a conversion tracking issue
+   - Do NOT flag as "tracking issues" or suggest fixing conversion tracking
+   - Focus recommendations on: lead quality, CPL optimization, audience targeting, creative testing
+
+2. "Add to Cart (Warm-up)", "View Content (Warm-up)", "Traffic (Warm-up)", or "Video Views (Warm-up)" campaigns:
+   - These are warm-up campaigns to help accounts exit the learning phase and build pixel data
+   - They are INTENTIONALLY optimizing for upper-funnel events, NOT purchases
+   - Expected to get SOME purchases as a side effect, but that's not the goal
+   - Do NOT criticize for "not getting purchases" or "poor conversion rates" - this is by design
+   - Do NOT suggest changing optimization or adding conversion tracking
+   - ONLY suggest adding a Purchase campaign when the account has MTD purchase conversions >= 10-15
+   - Focus recommendations on: engagement metrics, reaching learning phase completion, building audience data, CTR, traffic quality
+
+3. "Purchase" or "Sales" campaigns:
+   - Judge performance on ROAS, CPA, and conversion volume
+   - Standard benchmarks: CPA $20-$150 depending on product, ROAS 2.5-4.0x
+   - Focus on conversion optimization and revenue metrics
+
+CRITICAL: Always reference the "campaign_strategy" field to determine campaign type, NOT the "objective" field from META.
+${competitorNotes ? `\nCOMPETITIVE CONTEXT (from competitor analyses — use for strategy suggestions):\n${competitorNotes}\n` : ''}
+Provide:
+1. A performance summary for this client (considering campaign strategies)
+2. Specific, prioritized recommendations (each tied to a campaign where relevant)
+3. Any urgent issues (do NOT flag conversion tracking as an issue for lead campaigns getting purchases)
+4. The top 3-5 actions to take first
+
+IMPORTANT: Output must be valid JSON only. Do NOT include any surrounding commentary or markdown. Use the EXACT JSON structure below:
+{
+  "overall_summary": "Brief performance overview for this client",
+  "recommendations": [
+    {
+      "priority": "high|medium|low",
+      "action": "specific action to take",
+      "reasoning": "why this matters",
+      "expected_impact": "predicted outcome",
+      "campaign_id": "relevant campaign id or null"
+    }
+  ],
+  "urgent_issues": ["list of urgent items"],
+  "top_priorities": ["overall top 3-5 actions to take first"]
+}`,
+    reviewInstructions:
+      'Check every recommendation respects the campaign_strategy rules (no "fix tracking" on lead campaigns, no "not converting" criticism of warm-ups), references real campaign ids from the data, and that priorities are justified by the numbers.',
+    json: true,
+    llmOptions: { temperature: 0.3 },
+    finalize: async (result: any) => {
+      const { data: analysisRow, error: aErr } = await service
+        .from('analyses')
+        .insert({
+          workspace_id: job.workspace_id,
+          client_id: clientId,
+          kind: 'account',
+          summary: {
+            overall_summary: result?.overall_summary ?? null,
+            urgent_issues: result?.urgent_issues ?? [],
+            top_priorities: result?.top_priorities ?? [],
+          },
+        })
+        .select('id')
+        .single();
+      if (aErr) throw new Error(`Failed to save analysis: ${aErr.message}`);
+
+      const recs = Array.isArray(result?.recommendations) ? result.recommendations : [];
+      if (recs.length) {
+        const { error: sErr } = await service.from('suggestions').insert(
+          recs.map((r: any) => ({
+            workspace_id: job.workspace_id,
+            client_id: clientId,
+            analysis_id: analysisRow.id,
+            priority: ['high', 'medium', 'low'].includes(r.priority) ? r.priority : 'medium',
+            action: String(r.action ?? 'Untitled suggestion'),
+            reasoning: r.reasoning ? String(r.reasoning) : null,
+            expected_impact: r.expected_impact ? String(r.expected_impact) : null,
+            campaign_id: r.campaign_id ? String(r.campaign_id) : null,
+          })),
+        );
+        if (sErr) throw new Error(`Failed to save suggestions: ${sErr.message}`);
+      }
+
+      // Ping configured channels (Slack always; email to the workspace
+      // owner when resolvable). Best-effort.
+      try {
+        const clientName = (clientRow?.name as string) ?? clientCtx.name;
+        const { data: ws } = await service
+          .from('workspaces')
+          .select('owner_id')
+          .eq('id', job.workspace_id)
+          .maybeSingle();
+        let ownerEmail: string | undefined;
+        if (ws?.owner_id) {
+          const { data: owner } = await (service as any).auth.admin.getUserById(
+            ws.owner_id as string,
+          );
+          ownerEmail = owner?.user?.email ?? undefined;
+        }
+        const high = recs.filter((r: any) => r.priority === 'high').length;
+        await notifyWorkspace(service, {
+          workspaceId: job.workspace_id,
+          kind: 'suggestions',
+          subject: `${recs.length} new suggestion${recs.length === 1 ? '' : 's'} for ${clientName}`,
+          text: `${result?.overall_summary ?? ''}\n${high ? `${high} high priority. ` : ''}Review them on the CanopyStudio dashboard.`,
+          emailTo: ownerEmail ? [ownerEmail] : undefined,
+        });
+      } catch (e) {
+        console.error('[account_analysis] notify failed:', e);
+      }
+
+      return { ...result, analysis_id: analysisRow.id, suggestions_created: recs.length };
+    },
+  };
+};
+
 /** test_prompt — Phase-0 plumbing check. Exercises the full pipeline
  * (settings lookup, skills injection, collaboration chaining, JSON
  * parsing, usage rows) with a trivial marketing prompt. */
@@ -639,6 +819,7 @@ const BUILDERS: Record<string, SpecBuilder> = {
   regenerate_single: regenerateSingle,
   website_analysis: websiteAnalysis,
   competitor_analysis: competitorAnalysis,
+  account_analysis: accountAnalysis,
 };
 
 export function getSpecBuilder(type: string): SpecBuilder | null {
