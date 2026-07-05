@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { AIBadge } from '../components/AIBadge';
 import { AdThumb } from '../components/AdThumb';
 import { ChannelPreview } from '../components/ChannelPreview';
-import { Empty } from '../components/Empty';
 import { Icon } from '../components/Icon';
+import { LiveAdStudio } from './ad-studio/LiveAdStudio';
 import { useWorkspace } from '../workspace/WorkspaceProvider';
 import { ProgressBanner } from '../components/ProgressBanner';
 import { useQuery } from '../data/context';
@@ -38,16 +38,16 @@ const STEPPER = [
 // resolve this from the user's current workspace + selected campaign.
 const DEFAULT_BRIEF_CLIENT = 'acme';
 
-export function AdStudio() {
+export function AdStudio({
+  clientId,
+  locationId,
+}: {
+  clientId?: string;
+  locationId?: string;
+} = {}) {
   const workspace = useWorkspace();
   if (workspace) {
-    return (
-      <Empty
-        title="Ad Studio is being rebuilt"
-        body="The step-by-step ad-copy + creative flow from ad-optimizer / Swimm-Copywriting-API is the next port. It'll be scoped to the client (or location, for multi-location), pull from the scraped brand profile + recent campaigns, and brief Claude to generate copy + creative directions."
-        icon="sparkles"
-      />
-    );
+    return <LiveAdStudio clientId={clientId} locationId={locationId} />;
   }
 
   const { data: brief, loading } = useQuery<AdBrief | null>(

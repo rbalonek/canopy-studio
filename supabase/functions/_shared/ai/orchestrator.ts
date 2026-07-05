@@ -107,6 +107,10 @@ export interface OrchestratedPromptSpec {
   /** Parse the final text as JSON (extractJson on Anthropic). */
   json: boolean;
   llmOptions?: LlmOptions;
+  /** Optional post-processing applied by run-job to the final result
+   * (dedupe, reshaping) before it's stored on the jobs row. */
+  // deno-lint-ignore no-explicit-any
+  finalize?: (result: any) => any;
 }
 
 export interface StepOutcome {

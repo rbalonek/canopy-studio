@@ -117,13 +117,14 @@ async function processStep(jobId: string, step: number): Promise<void> {
     });
 
     if (outcome.done) {
+      const finalResult = spec.finalize ? spec.finalize(outcome.result) : outcome.result;
       await service
         .from('jobs')
         .update({
           status: 'completed',
           progress: 100,
           progress_message: outcome.message,
-          result: outcome.result ?? null,
+          result: finalResult ?? null,
           state: null,
           updated_at: new Date().toISOString(),
         })
