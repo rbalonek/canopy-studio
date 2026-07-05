@@ -840,7 +840,9 @@ const sendReport: SpecBuilder = async (service, job) => {
   ]);
 
   const clientName = (clientRow?.name as string) ?? 'Client';
-  const nameById = new Map((campaigns ?? []).map((c: any) => [c.id as string, c]));
+  const nameById = new Map<string, any>(
+    ((campaigns ?? []) as any[]).map((c) => [c.id as string, c]),
+  );
 
   // Roll up per campaign.
   const perCampaign = new Map<

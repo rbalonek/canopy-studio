@@ -81,14 +81,15 @@ Deno.serve(async (req) => {
     // 1. Authorize. Two callers: browsers (user JWT + RLS membership
     // gate) and internal automation — cron-dispatch — via the shared
     // secret, which has no user context and skips the member check.
-    let clientRow: { id: string; workspace_id: string } | null = null;
+    type ClientRow = { id: string; workspace_id: string };
+    let clientRow: ClientRow | null = null;
     if (isInternalCall(req)) {
       const { data } = await serviceClient
         .from('clients')
         .select('id, workspace_id')
         .eq('id', body.client_id)
         .maybeSingle();
-      clientRow = data as typeof clientRow;
+      clientRow = data as ClientRow | null;
       if (!clientRow) return json({ ok: false, error: 'Client not found' }, 404);
     } else {
       const auth = req.headers.get('Authorization');
@@ -117,7 +118,7 @@ Deno.serve(async (req) => {
       if (clientErr || !data) {
         return json({ ok: false, error: 'Client not found or access denied' }, 403);
       }
-      clientRow = data as typeof clientRow;
+      clientRow = data as ClientRow | null;
     }
     if (!clientRow) return json({ ok: false, error: 'Client not found' }, 404);
 
@@ -218,7 +219,7 @@ async function resolveAdAccountIds(
     .select('ad_account_id')
     .eq('client_id', clientId)
     .not('ad_account_id', 'is', null);
-  const fromLocations = (locs ?? [])
+  const fromLocations = ((locs ?? []) as any[])
     .map((l) => sanitizeAdAccountId(l.ad_account_id as string | null))
     .filter((v): v is string => !!v);
   if (fromLocations.length > 0) return fromLocations;

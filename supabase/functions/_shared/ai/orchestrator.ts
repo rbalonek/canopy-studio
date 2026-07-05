@@ -83,7 +83,8 @@ export async function loadSkills(
     .eq('enabled', true)
     .order('sort_order', { ascending: true });
   if (!data) return [];
-  return data
+  // deno-lint-ignore no-explicit-any
+  return (data as any[])
     .filter((s) => {
       const applies = (s.applies_to as string[] | null) ?? [];
       return applies.length === 0 || applies.includes(task);

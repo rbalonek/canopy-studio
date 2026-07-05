@@ -24,16 +24,22 @@ on hero screens", etc).
 
 Top-level router lives in [`src/App.tsx`](src/App.tsx):
 
-- `/` — redirects to `/dev` for now (will become the live, auth-gated
-  flow once steps 2–6 of the live-flow plan land — see below).
-- `/dev/*` — design reference, no auth, all 16 wireframe views browsable.
-- `/app/*` — not yet. Will mount the same `AppShell` with a different
-  prefix and a workspace-scoped data provider.
+- `/` — live gate: `<Login>` when signed out; when authed, redirects to
+  `/onboard` (no workspace yet) or `/app/<slug>` (first workspace).
+- `/dev/*` — design reference, no auth, all wireframe views browsable
+  on the mock provider.
+- `/app/:slug/*` — the live product: auth-gated, workspace-scoped,
+  Supabase provider, RLS does the tenant isolation.
 
 Routes are **prefix-agnostic**: [`src/routes.ts`](src/routes.ts) stores
-relative `subpath` values and the `Sidebar` takes a `prefix` prop. A
-shell mounted at `/dev` and a future shell at `/app` share the same
-ROUTES table. `routePath(prefix, subpath)` composes URLs.
+relative `subpath` values and the `Sidebar` takes a `prefix` prop. The
+`/dev` and `/app` shells share the same ROUTES table;
+`routePath(prefix, subpath)` composes URLs. Routes carry a `live` flag —
+the `/app` sidebar lists only `live: true` routes (wired-up features);
+everything else stays browsable under `/dev`. Several live views
+(BrandTab, CompetitorsTab, AdStudio, Reports) branch on
+`useWorkspace()`: workspace present → live implementation, null → the
+wireframe version for `/dev`.
 
 ## Data layer convention
 
@@ -83,27 +89,71 @@ One slice per commit, short subject + a few-paragraph body explaining
 the *why* and what migrated/changed. Co-Authored-By trailer on each.
 The existing `git log --oneline` is a good template.
 
-## Live-flow plan (in progress)
+## Current state
 
-Six-step plan agreed with the user (we're partway through):
+The original six-step live-flow plan (route split, workspaces schema,
+auth, onboarding, `/app` guard, META manual token) is **all done**, as
+is the feature build-out on top of it: campaigns/ad-sets/ads drill-down
+with Meta refresh, website scraper, and the AI platform below. `/dev`
+stays on the mock provider throughout — the showroom never depends on
+the live schema.
 
-1. **Route split — DONE** (commit `d0059b8`). All current views moved
-   under `/dev/*`. `/` redirects to `/dev` for now.
-2. **Workspaces schema** — second migration adding `profiles`,
-   `workspaces`, `workspace_members`, `clients.workspace_id`. RLS
-   flips from "anon read all" to "auth user reads own workspace."
-3. **Supabase auth wiring** — auth context, `/login` actually
-   authenticates. The existing `Auth` view becomes the real form.
-4. **Onboarding persistence** — the wizard writes the workspace +
-   first client.
-5. **`/app/*` auth guard** — gates the live product on auth + workspace.
-   Reads scoped to user's workspace via RLS.
-6. **META manual-token UI** — Settings → Connections gets a paste-token
-   field while META OAuth approval is pending; replace with real OAuth
-   later.
+## AI pipeline (jobs / providers / skills)
 
-`/dev` should keep working through all of this — it stays on the mock
-provider (cleanest) so the showroom doesn't depend on the live schema.
+Everything AI runs through one serverless pipeline:
+
+- **Jobs**: the browser calls the `enqueue-job` Edge Function →
+  `run-job` executes **one LLM call per invocation** (collaboration
+  mode = generate → review → refine as three chained invocations) →
+  the UI polls the `jobs` row every 2s (`src/data/useJob.ts`).
+  `run-job` is internal-only (`X-Internal-Secret`); browsers never call
+  it directly.
+- **Task registry**: [`supabase/functions/_shared/ai/taskSpecs.ts`](supabase/functions/_shared/ai/taskSpecs.ts)
+  maps job types to prompt builders — `copy_generation`,
+  `creative_directions`, `expand_content`, `regenerate_single`,
+  `website_analysis`, `competitor_analysis`, `account_analysis`,
+  `send_report`, `test_prompt`. Adding an AI capability = adding a
+  builder there.
+- **Prompts**: [`_shared/ai/prompts.ts`](supabase/functions/_shared/ai/prompts.ts)
+  is a **verbatim port of Swimm-Copywriting-API's prompts.js** — the
+  generation quality lives in those strings; don't reword casually.
+  Output schemas: google_ads {keywords, 15 headlines ≤30ch, 10
+  descriptions ≤90ch, EXACTLY 50 signals}, meta {5 primary_text, 5
+  headlines ≤25ch}.
+- **Provider config is data, not code**: `ai_settings` (per workspace,
+  per task) picks anthropic / openai / collaboration plus
+  generator+reviewer models. Editable in Settings → AI. Never hardcode
+  model IDs in functions.
+- **Skills**: the `skills` table holds markdown guidelines injected into
+  system prompts as "LEARNED GUIDELINE" blocks (Settings → Skills,
+  `applies_to` selects tasks; empty = all).
+- **Scheduling**: pg_cron → `cron-dispatch` (internal secret). Jobs:
+  daily 06:00 UTC `refresh_all` (Meta → campaigns +
+  `campaign_metrics_daily` history), Mon 07:00 `analysis_all`
+  (account_analysis → `suggestions` + connector ping), daily 07:00
+  `reports_due` (due `report_settings` → send_report). On login, a
+  once-per-session staleness check (`src/workspace/useStaleRefresh.ts`)
+  refreshes clients whose data is >12h old. Reads always come from
+  Supabase; Meta is only hit on refresh.
+- **Connectors**: `workspace_connectors` (Resend from-address + Slack
+  webhook; owner-only RLS — the webhook is a credential). Senders in
+  `_shared/notify.ts`; every attempt logs to `notification_log`.
+- **Publish (2B)**: `publish-meta-ad` creates campaign/adset/creative/ad
+  from a saved generation — **always status=PAUSED**, audit trail in
+  `ad_publishes`. External client accounts need `ads_management`
+  Advanced Access (Meta App Review); a System User token on your own BM
+  works without review.
+
+### Secrets checklist (per environment)
+
+- Edge Function secrets: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+  `RESEND_API_KEY`, `INTERNAL_FN_SECRET`.
+- Vault secrets (for pg_cron): `canopy_functions_url`
+  (`https://<ref>.supabase.co/functions/v1`) and
+  `canopy_internal_fn_secret` (must equal `INTERNAL_FN_SECRET`).
+- Until these exist, cron runs error harmlessly in
+  `cron.job_run_details` and the AI tabs surface "not configured"
+  errors.
 
 ## Useful commands
 
