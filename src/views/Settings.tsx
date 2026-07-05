@@ -4,6 +4,7 @@ import { Empty } from '../components/Empty';
 import { Icon } from '../components/Icon';
 import { useWorkspace } from '../workspace/WorkspaceProvider';
 import { AiSettingsTab } from './settings/AiSettingsTab';
+import { ConnectorsPanel } from './settings/ConnectorsPanel';
 import { SkillsTab } from './settings/SkillsTab';
 
 type TabId =
@@ -80,6 +81,7 @@ function ConnectionsTab() {
   return (
     <div className="stack gap-16">
       <WorkspaceMetaPanel />
+      <ConnectorsPanel />
       <div className="card">
         <div
           className="card-pad row between"
