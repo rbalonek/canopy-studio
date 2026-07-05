@@ -33,6 +33,7 @@
 
 // deno-lint-ignore-file no-explicit-any
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { isInternalCall } from '../_shared/internal.ts';
 
 const META_API_VERSION = 'v18.0';
 const META_GRAPH = `https://graph.facebook.com/${META_API_VERSION}`;
@@ -71,39 +72,54 @@ Deno.serve(async (req) => {
       return json({ ok: false, error: 'client_id is required' }, 400);
     }
 
-    const auth = req.headers.get('Authorization');
-    if (!auth?.startsWith('Bearer ')) {
-      return json({ ok: false, error: 'Missing Authorization header' }, 401);
-    }
-
-    // 1. User-scoped client to validate the JWT and the workspace-member check.
-    const userClient = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_ANON_KEY')!,
-      { global: { headers: { Authorization: auth } } },
-    );
-
-    const { data: userData, error: userErr } = await userClient.auth.getUser();
-    if (userErr || !userData.user) {
-      return json({ ok: false, error: 'Invalid session' }, 401);
-    }
-
-    // RLS will reject this select if the user isn't a member of the
-    // client's workspace, which is exactly the gate we want.
-    const { data: clientRow, error: clientErr } = await userClient
-      .from('clients')
-      .select('id, workspace_id')
-      .eq('id', body.client_id)
-      .maybeSingle();
-    if (clientErr || !clientRow) {
-      return json({ ok: false, error: 'Client not found or access denied' }, 403);
-    }
-
-    // 2. Service-role client to read the secret access_token and upsert.
+    // Service-role client (secret access_token read + upserts).
     const serviceClient = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
     );
+
+    // 1. Authorize. Two callers: browsers (user JWT + RLS membership
+    // gate) and internal automation — cron-dispatch — via the shared
+    // secret, which has no user context and skips the member check.
+    let clientRow: { id: string; workspace_id: string } | null = null;
+    if (isInternalCall(req)) {
+      const { data } = await serviceClient
+        .from('clients')
+        .select('id, workspace_id')
+        .eq('id', body.client_id)
+        .maybeSingle();
+      clientRow = data as typeof clientRow;
+      if (!clientRow) return json({ ok: false, error: 'Client not found' }, 404);
+    } else {
+      const auth = req.headers.get('Authorization');
+      if (!auth?.startsWith('Bearer ')) {
+        return json({ ok: false, error: 'Missing Authorization header' }, 401);
+      }
+
+      const userClient = createClient(
+        Deno.env.get('SUPABASE_URL')!,
+        Deno.env.get('SUPABASE_ANON_KEY')!,
+        { global: { headers: { Authorization: auth } } },
+      );
+
+      const { data: userData, error: userErr } = await userClient.auth.getUser();
+      if (userErr || !userData.user) {
+        return json({ ok: false, error: 'Invalid session' }, 401);
+      }
+
+      // RLS will reject this select if the user isn't a member of the
+      // client's workspace, which is exactly the gate we want.
+      const { data, error: clientErr } = await userClient
+        .from('clients')
+        .select('id, workspace_id')
+        .eq('id', body.client_id)
+        .maybeSingle();
+      if (clientErr || !data) {
+        return json({ ok: false, error: 'Client not found or access denied' }, 403);
+      }
+      clientRow = data as typeof clientRow;
+    }
+    if (!clientRow) return json({ ok: false, error: 'Client not found' }, 404);
 
     // Token resolution: prefer the workspace-level master token; fall back
     // to the per-client meta_accounts.access_token for clients set up
@@ -283,7 +299,9 @@ async function refreshFromMeta(
   }>;
 
   const now = new Date().toISOString();
+  const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
   const rows: any[] = [];
+  const metricRows: any[] = [];
 
   for (const c of campaigns) {
     try {
@@ -334,6 +352,26 @@ async function refreshFromMeta(
         last_refreshed_at: now,
         updated_at: now,
       });
+
+      // History: one immutable-ish row per campaign per day. "yesterday"
+      // insights are final by the time any refresh runs, so re-running a
+      // day simply overwrites with the same numbers.
+      metricRows.push({
+        campaign_id: c.id,
+        client_id: clientId,
+        date: yesterday,
+        spend: dailySpend,
+        impressions: num(daily?.impressions),
+        clicks: num(daily?.clicks),
+        results: dailyActions.count,
+        result_type: dailyActions.type,
+        metrics: {
+          cpc: num(daily?.cpc),
+          cpm: num(daily?.cpm),
+          ctr: num(daily?.ctr),
+          all_actions: dailyActions.all,
+        },
+      });
     } catch (e) {
       errors.push(`${c.id} (${c.name}): ${(e as Error).message}`);
     }
@@ -342,6 +380,13 @@ async function refreshFromMeta(
   if (rows.length > 0) {
     const { error: upsertErr } = await service.from('campaigns').upsert(rows, { onConflict: 'id' });
     if (upsertErr) return { ok: false, error: `Upsert failed: ${upsertErr.message}` };
+  }
+
+  if (metricRows.length > 0) {
+    const { error: histErr } = await service
+      .from('campaign_metrics_daily')
+      .upsert(metricRows, { onConflict: 'campaign_id,date' });
+    if (histErr) errors.push(`daily metrics: ${histErr.message}`);
   }
 
   // For each campaign, pull ad sets, then for each ad set pull ads.
