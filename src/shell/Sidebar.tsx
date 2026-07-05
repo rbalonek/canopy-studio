@@ -58,9 +58,10 @@ export function Sidebar({ prefix }: Props) {
       <div className="side-nav">
         {ROUTES.filter((r) => {
           if (r.hidden) return false;
-          // Hide Design System section inside a real workspace — it's
-          // dev-only design reference, not for end users.
-          if (workspace && r.section === 'design-system') return false;
+          // Live workspaces only list wired-up features; everything else
+          // (design system, mock-only views, wireframe flows) stays
+          // browsable under /dev.
+          if (workspace) return !!r.live;
           return true;
         }).map((r) => {
           const showHeader = r.section !== currentSection;
