@@ -10,6 +10,7 @@
 //   4. Save — insert/update a generations row.
 
 import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { supabase } from '../../auth/supabaseClient';
 import { Icon } from '../../components/Icon';
 import { useWorkspace } from '../../workspace/WorkspaceProvider';
@@ -40,13 +41,17 @@ export function LiveAdStudio({
   locationId?: string;
 }) {
   const workspace = useWorkspace();
+  const location = useLocation();
+  // "Draft ad from this angle" (competitors tab) navigates here with a
+  // pre-filled campaign idea in router state.
+  const prefillIdea = (location.state as { prefillIdea?: string } | null)?.prefillIdea;
 
   // Brief state
   const [clientId, setClientId] = useState<string | null>(scopedClientId ?? null);
   const [clients, setClients] = useState<Array<{ id: string; name: string }>>([]);
   const [campaignName, setCampaignName] = useState('');
   const [landingUrl, setLandingUrl] = useState('');
-  const [idea, setIdea] = useState('');
+  const [idea, setIdea] = useState(prefillIdea ?? '');
   const [medium, setMedium] = useState<Medium>('BOTH');
   const [extraContext, setExtraContext] = useState('');
 

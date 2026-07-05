@@ -106,6 +106,7 @@ async function scrapedContentSection(
     .from('scraped_pages')
     .select('url, title, content, word_count')
     .eq('client_id', clientId)
+    .is('competitor_id', null)
     .order('word_count', { ascending: false })
     .limit(3);
   if (!data?.length) return '';
@@ -344,12 +345,14 @@ const websiteAnalysis: SpecBuilder = async (service, job) => {
       .from('scraped_pages')
       .select('url, title, content')
       .eq('client_id', clientId)
+      .is('competitor_id', null)
       .order('word_count', { ascending: false })
       .limit(12),
     service
       .from('scraped_domains')
       .select('domain, raw_palette, raw_fonts, logo_url')
       .eq('client_id', clientId)
+      .is('competitor_id', null)
       .order('last_crawled_at', { ascending: false })
       .limit(1)
       .maybeSingle(),
@@ -499,6 +502,117 @@ Synthesize all findings into immediately actionable brand knowledge. Return your
 }`;
 }
 
+/** competitor_analysis — client brand vs one competitor's scraped site.
+ * Produces a comparison table, gap angles (draftable in Ad Studio), and
+ * a takeaway. finalize() stores the analysis on the competitor row and
+ * replaces its gap_angles. */
+const competitorAnalysis: SpecBuilder = async (service, job) => {
+  if (!job.client_id) throw new Error('competitor_analysis requires a client_id');
+  const clientId = job.client_id;
+  const competitorId = job.input?.competitor_id as string | undefined;
+  if (!competitorId) throw new Error('competitor_analysis requires input.competitor_id');
+
+  const [{ data: competitor }, clientCtx, { data: compPages }, skills] = await Promise.all([
+    service
+      .from('competitors')
+      .select('id, domain, name')
+      .eq('id', competitorId)
+      .eq('client_id', clientId)
+      .maybeSingle(),
+    loadBrandContext(service, clientId),
+    service
+      .from('scraped_pages')
+      .select('url, title, content')
+      .eq('competitor_id', competitorId)
+      .order('word_count', { ascending: false })
+      .limit(8),
+    loadSkills(service, job.workspace_id, 'competitor_analysis'),
+  ]);
+
+  if (!competitor) throw new Error('Competitor not found for this client');
+  if (!compPages?.length) {
+    throw new Error('No scraped pages for this competitor yet — scrape their site first.');
+  }
+
+  const perPage = Math.max(1500, Math.floor(20_000 / compPages.length));
+  const competitorContent = compPages
+    .map(
+      (p: any) =>
+        `--- ${p.url}${p.title ? ` ("${p.title}")` : ''} ---\n${((p.content as string) ?? '').slice(0, perPage)}`,
+    )
+    .join('\n\n');
+
+  const competitorName = (competitor.name as string) || (competitor.domain as string);
+
+  return {
+    system:
+      'You are a competitive-intelligence strategist for advertising teams. You compare a client brand against a competitor using only evidence from the provided content. Always respond with valid JSON.' +
+      skillsBlock(skills),
+    user: `## OUR CLIENT (the brand we work for)
+${formatClientContext(clientCtx)}
+
+## COMPETITOR BEING ANALYZED
+Name: ${competitorName}
+Domain: ${competitor.domain}
+
+## COMPETITOR WEBSITE CONTENT (scraped)
+${competitorContent}
+
+## YOUR TASK
+Compare the competitor's positioning, offers, messaging, and calls-to-action against our client. Then identify GAP ANGLES: specific, actionable advertising angles our client could run that the competitor is missing, or that neutralize a competitor strength. Every claim must be grounded in the content above — no invented facts.
+
+Return valid JSON with this exact structure:
+{
+  "positioning_summary": "2-3 sentences on how this competitor positions itself and to whom",
+  "comparison_rows": [
+    { "dimension": "e.g. Pricing transparency", "client": "what our client does", "competitor": "what the competitor does", "advantage": "client" | "competitor" | "neutral" }
+  ],
+  "gap_angles": [
+    { "title": "Short angle name", "confidence": 0-100, "evidence": "1-2 sentences citing what in the content supports this angle" }
+  ],
+  "takeaway": "The single most important strategic takeaway for our client's advertising"
+}
+
+Provide 4-6 comparison_rows and 3-5 gap_angles.`,
+    reviewInstructions:
+      'Check every comparison row and gap angle is grounded in the provided competitor content (no invented facts), the gap angles are specific enough to brief an ad from, and confidence scores are justified by the evidence.',
+    json: true,
+    llmOptions: { temperature: 0.3 },
+    finalize: async (result: any) => {
+      const now = new Date().toISOString();
+      const { error: updateErr } = await service
+        .from('competitors')
+        .update({
+          analysis: {
+            positioning_summary: result?.positioning_summary ?? null,
+            comparison_rows: result?.comparison_rows ?? [],
+            takeaway: result?.takeaway ?? null,
+          },
+          analyzed_at: now,
+        })
+        .eq('id', competitorId);
+      if (updateErr) throw new Error(`Failed to save analysis: ${updateErr.message}`);
+
+      // Replace this competitor's gap angles with the fresh set.
+      await service.from('gap_angles').delete().eq('competitor_id', competitorId);
+      const angles = Array.isArray(result?.gap_angles) ? result.gap_angles : [];
+      if (angles.length) {
+        const { error: gapErr } = await service.from('gap_angles').insert(
+          angles.map((a: any) => ({
+            client_id: clientId,
+            competitor_id: competitorId,
+            title: String(a.title ?? 'Untitled angle'),
+            confidence: Math.max(0, Math.min(100, Number(a.confidence) || 50)),
+            evidence: a.evidence ? String(a.evidence) : null,
+          })),
+        );
+        if (gapErr) throw new Error(`Failed to save gap angles: ${gapErr.message}`);
+      }
+      return { ...result, saved: true };
+    },
+  };
+};
+
 /** test_prompt — Phase-0 plumbing check. Exercises the full pipeline
  * (settings lookup, skills injection, collaboration chaining, JSON
  * parsing, usage rows) with a trivial marketing prompt. */
@@ -524,6 +638,7 @@ const BUILDERS: Record<string, SpecBuilder> = {
   expand_content: expandContent,
   regenerate_single: regenerateSingle,
   website_analysis: websiteAnalysis,
+  competitor_analysis: competitorAnalysis,
 };
 
 export function getSpecBuilder(type: string): SpecBuilder | null {

@@ -35,6 +35,9 @@ interface Req {
   url: string;
   /** Cap on pages scraped. Default 8. */
   max_pages?: number;
+  /** When set, this is a competitor scrape: pages/domain rows are tagged
+   * with the competitor and replaced wholesale on each run. */
+  competitor_id?: string;
 }
 
 Deno.serve(async (req) => {
@@ -71,8 +74,27 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
     );
 
+    // Competitor scrapes must reference a competitor of this client.
+    if (body.competitor_id) {
+      const { data: comp } = await service
+        .from('competitors')
+        .select('id')
+        .eq('id', body.competitor_id)
+        .eq('client_id', body.client_id)
+        .maybeSingle();
+      if (!comp) {
+        return json({ ok: false, error: 'Competitor not found for this client' }, 404);
+      }
+    }
+
     const maxPages = Math.max(1, Math.min(body.max_pages ?? 8, 20));
-    const result = await scrape(body.client_id, body.url, maxPages, service);
+    const result = await scrape(
+      body.client_id,
+      body.url,
+      maxPages,
+      service,
+      body.competitor_id ?? null,
+    );
     return json(result, 200);
   } catch (e) {
     return json({ ok: false, error: (e as Error).message }, 500);
@@ -84,6 +106,7 @@ async function scrape(
   startUrl: string,
   maxPages: number,
   service: ReturnType<typeof createClient>,
+  competitorId: string | null = null,
 ): Promise<{
   ok: boolean;
   pages_scraped: number;
@@ -137,25 +160,32 @@ async function scrape(
   const toScrape = ranked.slice(0, maxPages);
 
   // --- 2. Scrape each ---
+  // Competitor runs replace their previous pages wholesale (the
+  // client_id+url unique key can't distinguish competitors).
+  if (competitorId) {
+    await service.from('scraped_pages').delete().eq('competitor_id', competitorId);
+  }
+
   let scrapedCount = 0;
   for (const u of toScrape) {
     try {
       const page = await fetchAndParse(u);
       if (!page) continue;
-      const { error: upsertErr } = await service.from('scraped_pages').upsert(
-        {
-          client_id: clientId,
-          url: u,
-          title: page.title,
-          content: page.content,
-          word_count: page.wordCount,
-          status: 'analyzed',
-          scraped_at: new Date().toISOString(),
-        },
-        { onConflict: 'client_id,url' },
-      );
-      if (upsertErr) {
-        errors.push(`upsert ${u}: ${upsertErr.message}`);
+      const row = {
+        client_id: clientId,
+        competitor_id: competitorId,
+        url: u,
+        title: page.title,
+        content: page.content,
+        word_count: page.wordCount,
+        status: 'analyzed',
+        scraped_at: new Date().toISOString(),
+      };
+      const { error: writeErr } = competitorId
+        ? await service.from('scraped_pages').insert(row)
+        : await service.from('scraped_pages').upsert(row, { onConflict: 'client_id,url' });
+      if (writeErr) {
+        errors.push(`write ${u}: ${writeErr.message}`);
         continue;
       }
       scrapedCount++;
@@ -175,21 +205,29 @@ async function scrape(
   }
 
   // --- 4. Roll up domain stats ---
-  await service.from('scraped_domains').upsert(
-    {
-      client_id: clientId,
-      domain,
-      health: scrapedCount > 0 ? 'Healthy' : 'Error',
-      sitemap_status: sitemapStatus,
-      pages_discovered: discovered.size,
-      pages_indexed: scrapedCount,
-      raw_palette: design.palette.length ? design.palette : null,
-      raw_fonts: design.fonts.length ? design.fonts : null,
-      logo_url: design.logoUrl,
-      last_crawled_at: new Date().toISOString(),
-    },
-    { onConflict: 'client_id,domain' },
-  );
+  const domainRow = {
+    client_id: clientId,
+    competitor_id: competitorId,
+    domain,
+    health: scrapedCount > 0 ? 'Healthy' : 'Error',
+    sitemap_status: sitemapStatus,
+    pages_discovered: discovered.size,
+    pages_indexed: scrapedCount,
+    raw_palette: design.palette.length ? design.palette : null,
+    raw_fonts: design.fonts.length ? design.fonts : null,
+    logo_url: design.logoUrl,
+    last_crawled_at: new Date().toISOString(),
+  };
+  if (competitorId) {
+    await service.from('scraped_domains').delete().eq('competitor_id', competitorId);
+    await service.from('scraped_domains').insert(domainRow);
+    await service
+      .from('competitors')
+      .update({ last_scraped_at: new Date().toISOString() })
+      .eq('id', competitorId);
+  } else {
+    await service.from('scraped_domains').upsert(domainRow, { onConflict: 'client_id,domain' });
+  }
 
   return {
     ok: scrapedCount > 0,
