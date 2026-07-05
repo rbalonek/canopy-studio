@@ -3,12 +3,16 @@ import { supabase } from '../auth/supabaseClient';
 import { Empty } from '../components/Empty';
 import { Icon } from '../components/Icon';
 import { useWorkspace } from '../workspace/WorkspaceProvider';
+import { AiSettingsTab } from './settings/AiSettingsTab';
+import { SkillsTab } from './settings/SkillsTab';
 
 type TabId =
   | 'account'
   | 'workspace'
   | 'team'
   | 'connections'
+  | 'ai'
+  | 'skills'
   | 'billing'
   | 'api'
   | 'notifications'
@@ -19,6 +23,8 @@ const TABS: TabId[] = [
   'workspace',
   'team',
   'connections',
+  'ai',
+  'skills',
   'billing',
   'api',
   'notifications',
@@ -57,6 +63,10 @@ export function Settings() {
         <div>
           {tab === 'connections' ? (
             <ConnectionsTab />
+          ) : tab === 'ai' ? (
+            <AiSettingsTab />
+          ) : tab === 'skills' ? (
+            <SkillsTab />
           ) : (
             <Empty title={`${tab} — wireframe`} body="Form-based settings panel following shell conventions." />
           )}
