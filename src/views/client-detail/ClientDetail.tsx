@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../../auth/supabaseClient';
 import { Icon } from '../../components/Icon';
@@ -41,6 +41,26 @@ export function ClientDetail() {
 
   const [tab, setTab] = useState<TabId>('overview');
   const tabs: TabId[] = state.mode === 'agency' ? [...BASE_TABS, 'locations'] : BASE_TABS;
+
+  // Live only: show the brand logo (if analyzed/entered) in place of the
+  // initials avatar. /dev (mock, no workspace) keeps the initials.
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setLogoUrl(null);
+    if (!supabase || !workspace) return;
+    supabase
+      .from('brand_profiles')
+      .select('logo_url')
+      .eq('client_id', clientId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled) setLogoUrl((data?.logo_url as string | null) ?? null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId, workspace?.id]);
 
   const [refreshing, setRefreshing] = useState(false);
   const [refreshMsg, setRefreshMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
@@ -117,12 +137,23 @@ export function ClientDetail() {
       </div>
       <div className="row between" style={{ marginBottom: 20 }}>
         <div className="row gap-12">
-          <div
-            className="logo-mark"
-            style={{ width: 44, height: 44, fontSize: 18, borderRadius: 10 }}
-          >
-            {initials}
-          </div>
+          {logoUrl ? (
+            <img
+              src={logoUrl}
+              alt={`${header.name} logo`}
+              // Auto-width up to a cap so a full wordmark fits; contained so it's
+              // never cropped. Falls back to initials if the image fails to load.
+              style={{ height: 48, maxWidth: 200, objectFit: 'contain', borderRadius: 8 }}
+              onError={() => setLogoUrl(null)}
+            />
+          ) : (
+            <div
+              className="logo-mark"
+              style={{ width: 44, height: 44, fontSize: 18, borderRadius: 10 }}
+            >
+              {initials}
+            </div>
+          )}
           <div className="stack gap-4">
             <h1 className="h0">{header.name}</h1>
             <div className="row gap-8 meta">
