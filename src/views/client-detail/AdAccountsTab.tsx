@@ -83,10 +83,140 @@ export function AdAccountsTab({ clientId }: { clientId: string }) {
           }}
         />
       )}
+      {connection && !editing && <PullPastData clientId={clientId} />}
       <CampaignsTable clientId={clientId} />
     </div>
   );
 }
+
+/**
+ * Backfill historical daily metrics for a date range without a full account
+ * refresh. Invokes meta-refresh-client with a `backfill` window; the function
+ * pulls per-day campaign insights (time_range + time_increment=1) and upserts
+ * them into campaign_metrics_daily (idempotent), so a user can pull, say, this
+ * year and last year for comparison in the Overview tab's Custom range. The
+ * current campaigns snapshot is untouched.
+ */
+function PullPastData({ clientId }: { clientId: string }) {
+  const [range, setRange] = useState(() => lastYearRange());
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  async function pull() {
+    if (!supabase) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      const { data, error } = await supabase.functions.invoke('meta-refresh-client', {
+        body: { client_id: clientId, backfill: { since: range.start, until: range.end } },
+      });
+      if (error) {
+        setResult({ ok: false, msg: error.message });
+      } else {
+        const days = (data as any)?.refreshed ?? 0;
+        const skipped = (data as any)?.skipped as number | undefined;
+        const errs = (data as any)?.errors as string[] | undefined;
+        const singular = (data as any)?.error as string | undefined;
+        const skipNote = skipped ? ` (${skipped} skipped — deleted campaigns)` : '';
+        if (singular) {
+          // Setup error (no token / no ad account / bad range).
+          setResult({ ok: false, msg: singular });
+        } else if (errs?.length) {
+          // Partial or full per-chunk failure — surface the actual messages.
+          setResult({
+            ok: days > 0,
+            msg: `Pulled ${days} day-rows${skipNote}; ${errs.length} error(s): ${errs.slice(0, 3).join(' | ')}`,
+          });
+        } else {
+          setResult({
+            ok: true,
+            msg: `Pulled ${days} day-rows of history${skipNote}. View it under Overview → Custom.`,
+          });
+        }
+      }
+    } catch (e) {
+      setResult({ ok: false, msg: (e as Error).message });
+    }
+    setBusy(false);
+  }
+
+  return (
+    <div className="card card-pad stack gap-10">
+      <div className="row gap-8">
+        <Icon name="calendar" size={14} />
+        <span style={{ fontWeight: 500 }}>Pull past data</span>
+      </div>
+      <div className="meta" style={{ fontSize: 12 }}>
+        Backfill historical daily performance from Meta for a specific date range — e.g. this year or
+        last year — so you can compare periods in <strong>Overview → Custom</strong> without a full
+        account refresh. Safe to re-run; existing days are overwritten, not duplicated.
+      </div>
+      <div className="row gap-8" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+        <input
+          type="date"
+          value={range.start}
+          max={range.end}
+          onChange={(e) => setRange((r) => ({ ...r, start: e.target.value }))}
+          style={dateInputStyle}
+          disabled={busy}
+        />
+        <span className="meta">→</span>
+        <input
+          type="date"
+          value={range.end}
+          min={range.start}
+          max={todayISO()}
+          onChange={(e) => setRange((r) => ({ ...r, end: e.target.value }))}
+          style={dateInputStyle}
+          disabled={busy}
+        />
+        <div className="seg">
+          <button style={presetBtnStyle} onClick={() => setRange(thisYearRange())} disabled={busy}>
+            This year
+          </button>
+          <button style={presetBtnStyle} onClick={() => setRange(lastYearRange())} disabled={busy}>
+            Last year
+          </button>
+        </div>
+        <button className="btn primary sm" onClick={pull} disabled={busy}>
+          {busy ? 'Pulling…' : 'Pull past data'}
+        </button>
+      </div>
+      {result && (
+        <div
+          className="banner"
+          style={{ color: result.ok ? 'var(--fg)' : 'var(--danger, #c33)', fontSize: 12 }}
+        >
+          {result.ok ? '✓ ' : '⚠ '}
+          {result.msg}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function todayISO(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+function thisYearRange(): { start: string; end: string } {
+  const y = new Date().getFullYear();
+  return { start: `${y}-01-01`, end: todayISO() };
+}
+function lastYearRange(): { start: string; end: string } {
+  const y = new Date().getFullYear() - 1;
+  return { start: `${y}-01-01`, end: `${y}-12-31` };
+}
+
+const dateInputStyle: React.CSSProperties = {
+  background: 'var(--bg-1)',
+  border: '1px solid var(--border)',
+  borderRadius: 8,
+  color: 'var(--fg)',
+  padding: '6px 10px',
+  font: 'inherit',
+  fontSize: 12,
+};
+const presetBtnStyle: React.CSSProperties = { padding: '4px 12px', fontSize: 12 };
 
 function ConnectionCard({
   connection,

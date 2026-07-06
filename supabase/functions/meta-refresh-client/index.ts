@@ -47,11 +47,21 @@ interface RefreshRequest {
    * client's configured accounts). Narrows the refresh to the single account
    * the user acted on instead of fanning out over all of them. */
   ad_account_id?: string;
+  /** Optional — historical backfill. When present, the function does NOT refresh
+   * the current `campaigns` snapshot; it pulls per-day campaign insights for the
+   * range (time_range + time_increment=1) and upserts them into
+   * `campaign_metrics_daily`. Idempotent via unique(campaign_id, date), so the
+   * user can pull past periods (e.g. this year / last year) without a full
+   * account refresh and without clobbering today's numbers. */
+  backfill?: { since?: string; until?: string };
 }
 
 interface RefreshResult {
   ok: boolean;
   refreshed?: number;
+  /** Backfill only: per-day rows skipped because their campaign no longer
+   * exists in the table (deleted campaigns referenced by historical insights). */
+  skipped?: number;
   errors?: string[];
   /** ad_account_ids that we actually attempted (sanitized form). */
   attempted?: string[];
@@ -175,6 +185,28 @@ Deno.serve(async (req) => {
           400,
         );
       }
+    }
+
+    // 2b. Historical backfill path — pull per-day insights into
+    // campaign_metrics_daily for the requested range and return, without
+    // touching the current campaigns snapshot.
+    if (body.backfill) {
+      const { since, until } = normalizeBackfillRange(body.backfill);
+      if (!since || !until) {
+        return json(
+          { ok: false, error: 'backfill.since and backfill.until must be YYYY-MM-DD dates.' },
+          400,
+        );
+      }
+      const backfillSummary = await backfillAllAdAccounts(
+        body.client_id,
+        targetAccounts,
+        accessToken,
+        since,
+        until,
+        serviceClient,
+      );
+      return json(backfillSummary, 200);
     }
 
     // 3. Pull campaigns for each targeted ad account.
@@ -326,12 +358,12 @@ async function metaFetch(url: string): Promise<Response> {
 /** Follow Meta paging.next across all pages of an edge, returning the flattened
  * `data` rows. Throws a formatted error (incl. the rate-limit hint) on failure. */
 // deno-lint-ignore no-explicit-any
-async function fetchAllPages(url: URL, label: string): Promise<any[]> {
+async function fetchAllPages(url: URL, label: string, maxPages = 25): Promise<any[]> {
   // deno-lint-ignore no-explicit-any
   const out: any[] = [];
   let next: string | null = url.toString();
   let guard = 0;
-  while (next && guard < 25) {
+  while (next && guard < maxPages) {
     guard++;
     const res = await metaFetch(next);
     if (!res.ok) {
@@ -395,6 +427,228 @@ function periodMetrics(row: Record<string, any> | null | undefined): Record<stri
     date_start: (row?.date_start as string | undefined) ?? null,
     date_stop: (row?.date_stop as string | undefined) ?? null,
     actions,
+  };
+}
+
+// --- Historical backfill --------------------------------------------------
+
+/** Purchase conversion value action types, richest-first. Used to derive
+ * revenue (which is additive across days, unlike ROAS). */
+const PURCHASE_VALUE_TYPES = [
+  'omni_purchase',
+  'offsite_conversion.fb_pixel_purchase',
+  'purchase',
+  'onsite_web_purchase',
+];
+
+/** First present (>0) value among candidate action types in an action_values
+ * array (Meta's monetary counterpart to `actions`). */
+// deno-lint-ignore no-explicit-any
+function pickActionValue(values: any[] | undefined | null, types: string[]): number {
+  if (!Array.isArray(values)) return 0;
+  const map: Record<string, number> = {};
+  for (const v of values) map[v.action_type] = num(v.value);
+  for (const t of types) if (map[t] > 0) return map[t];
+  return 0;
+}
+
+/** Validate a YYYY-MM-DD string. */
+function isoDate(s: unknown): string | null {
+  return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+}
+
+/** Sanitize the requested backfill window: valid ISO dates, since ≤ until,
+ * until ≤ today, and since floored to Meta's ~37-month insights retention. */
+function normalizeBackfillRange(b: { since?: string; until?: string }): {
+  since: string | null;
+  until: string | null;
+} {
+  let since = isoDate(b?.since);
+  let until = isoDate(b?.until);
+  if (!since || !until) return { since: null, until: null };
+  if (since > until) [since, until] = [until, since];
+  const today = new Date().toISOString().slice(0, 10);
+  if (until > today) until = today;
+  const floor = new Date(Date.now() - 37 * 30 * 86_400_000).toISOString().slice(0, 10);
+  if (since < floor) since = floor;
+  return { since, until };
+}
+
+/** Split an inclusive [since, until] window into calendar-month chunks. Keeps
+ * each per-day insights call small (campaigns × ≤31 rows) — well within Meta's
+ * sync-insights payload limit and our page guard — instead of one massive
+ * time_range spanning a year. */
+function monthChunks(since: string, until: string): { since: string; until: string }[] {
+  const out: { since: string; until: string }[] = [];
+  let cursor = since;
+  let guard = 0;
+  while (cursor <= until && guard < 60) {
+    guard++;
+    const yy = parseInt(cursor.slice(0, 4), 10);
+    const mm = parseInt(cursor.slice(5, 7), 10);
+    const lastDay = new Date(Date.UTC(yy, mm, 0)).getUTCDate();
+    const monthEnd = `${yy}-${String(mm).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+    out.push({ since: cursor, until: monthEnd < until ? monthEnd : until });
+    const nextY = mm === 12 ? yy + 1 : yy;
+    const nextM = mm === 12 ? 1 : mm + 1;
+    cursor = `${nextY}-${String(nextM).padStart(2, '0')}-01`;
+  }
+  return out;
+}
+
+/** One account-level per-day insights call for a date window (time_range +
+ * time_increment=1). Returns the raw rows — each carries `${idField}` +
+ * `date_start` (the day). Higher page guard than the preset path: a month of
+ * daily rows for a large account can exceed 25 pages. */
+async function fetchRangeInsights(
+  acct: string,
+  level: 'campaign' | 'adset' | 'ad',
+  since: string,
+  until: string,
+  fields: string,
+  accessToken: string,
+  // deno-lint-ignore no-explicit-any
+): Promise<any[]> {
+  const idField = level === 'campaign' ? 'campaign_id' : level === 'adset' ? 'adset_id' : 'ad_id';
+  const url = new URL(`${META_GRAPH}/${acct}/insights`);
+  url.searchParams.set('level', level);
+  url.searchParams.set('fields', `${idField},${fields},date_start`);
+  url.searchParams.set('time_range', JSON.stringify({ since, until }));
+  url.searchParams.set('time_increment', '1');
+  url.searchParams.set('limit', '500');
+  url.searchParams.set('access_token', accessToken);
+  return await fetchAllPages(url, `/insights ${level} ${since}..${until}`, 120);
+}
+
+/** Backfill campaign_metrics_daily for one ad account over [since, until].
+ * Does NOT touch the campaigns snapshot — history only. */
+async function backfillFromMeta(
+  clientId: string,
+  adAccountId: string,
+  accessToken: string,
+  since: string,
+  until: string,
+  service: ReturnType<typeof createClient>,
+): Promise<{ ok: boolean; days: number; skipped: number; error?: string; errors?: string[] }> {
+  const acct = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+  const errors: string[] = [];
+
+  // Campaign names/objectives → strategy, so per-day `results` matches the
+  // primary-action logic the nightly refresh uses.
+  const campaignsUrl = new URL(`${META_GRAPH}/${acct}/campaigns`);
+  campaignsUrl.searchParams.set('fields', 'id,name,objective');
+  campaignsUrl.searchParams.set('access_token', accessToken);
+  campaignsUrl.searchParams.set('limit', '200');
+  let campaigns: Array<{ id: string; name: string; objective: string }> = [];
+  try {
+    campaigns = (await fetchAllPages(campaignsUrl, '/campaigns')) as any;
+  } catch (e) {
+    return { ok: false, days: 0, error: `Meta /campaigns failed: ${(e as Error).message}` };
+  }
+  const stratById = new Map<string, { name: string; expected: string[] }>();
+  for (const c of campaigns) stratById.set(c.id, parseStrategy(c.name, c.objective));
+
+  const FIELDS =
+    'spend,impressions,clicks,actions,action_values,cpc,cpm,ctr,reach,frequency,purchase_roas,website_purchase_roas';
+
+  const metricRows: any[] = [];
+  for (const chunk of monthChunks(since, until)) {
+    let rows: any[];
+    try {
+      rows = await fetchRangeInsights(acct, 'campaign', chunk.since, chunk.until, FIELDS, accessToken);
+    } catch (e) {
+      errors.push(`${chunk.since}..${chunk.until}: ${(e as Error).message}`);
+      continue;
+    }
+    for (const r of rows) {
+      const cid = r.campaign_id as string | undefined;
+      const date = r.date_start as string | undefined;
+      if (!cid || !date) continue;
+      const strat = stratById.get(cid) ?? { name: 'Unknown', expected: [] };
+      const act = extractPrimaryAction(r.actions, strat.expected);
+      const spend = num(r.spend);
+      const revenue = pickActionValue(r.action_values, PURCHASE_VALUE_TYPES);
+      const roas =
+        num(r.purchase_roas?.[0]?.value ?? r.website_purchase_roas?.[0]?.value) ||
+        (spend > 0 ? revenue / spend : 0);
+      metricRows.push({
+        campaign_id: cid,
+        client_id: clientId,
+        date,
+        spend,
+        impressions: num(r.impressions),
+        clicks: num(r.clicks),
+        results: act.count,
+        result_type: act.type,
+        metrics: {
+          cpc: num(r.cpc),
+          cpm: num(r.cpm),
+          ctr: num(r.ctr),
+          all_actions: act.all,
+          revenue,
+          roas,
+        },
+      });
+    }
+  }
+
+  // The FK campaign_metrics_daily.campaign_id → campaigns.id means we can only
+  // write history for campaigns that exist in the table. Historical insights
+  // routinely reference campaigns that were since DELETED (they're absent from
+  // the current /campaigns list and the table), so filter those out — otherwise
+  // one orphan id aborts the whole 500-row batch. Skipped rows are reported, not
+  // swallowed, so a lower historical total is explainable.
+  const { data: known } = await service
+    .from('campaigns')
+    .select('id')
+    .eq('ad_account_id', acct);
+  const knownIds = new Set((known ?? []).map((r: any) => r.id as string));
+  const insertable = metricRows.filter((r) => knownIds.has(r.campaign_id));
+  const skipped = metricRows.length - insertable.length;
+
+  let days = 0;
+  const BATCH = 500;
+  for (let i = 0; i < insertable.length; i += BATCH) {
+    const slice = insertable.slice(i, i + BATCH);
+    const { error } = await service
+      .from('campaign_metrics_daily')
+      .upsert(slice, { onConflict: 'campaign_id,date' });
+    if (error) errors.push(`daily upsert: ${error.message}`);
+    else days += slice.length;
+  }
+
+  return { ok: errors.length === 0, days, skipped, errors: errors.length ? errors : undefined };
+}
+
+async function backfillAllAdAccounts(
+  clientId: string,
+  adAccountIds: string[],
+  accessToken: string,
+  since: string,
+  until: string,
+  service: ReturnType<typeof createClient>,
+): Promise<RefreshResult> {
+  let total = 0;
+  let skipped = 0;
+  const errors: string[] = [];
+  for (const id of adAccountIds) {
+    const r = await backfillFromMeta(clientId, id, accessToken, since, until, service);
+    if (!r.ok && r.error) {
+      errors.push(`${id}: ${r.error}`);
+      continue;
+    }
+    total += r.days ?? 0;
+    skipped += r.skipped ?? 0;
+    if (r.errors) errors.push(...r.errors);
+  }
+  return {
+    ok: errors.length === 0,
+    // `refreshed` here = per-day campaign rows written to history.
+    refreshed: total,
+    skipped: skipped || undefined,
+    errors: errors.length ? errors : undefined,
+    attempted: adAccountIds,
+    at: new Date().toISOString(),
   };
 }
 
@@ -569,7 +823,7 @@ async function refreshFromMeta(
   // Campaign insights in TWO account-level calls (this_month + yesterday),
   // keyed by campaign id — not one /insights call per campaign.
   const CAMPAIGN_INSIGHT_FIELDS =
-    'spend,impressions,clicks,actions,cpc,cpm,ctr,reach,frequency,purchase_roas,website_purchase_roas';
+    'spend,impressions,clicks,actions,action_values,cpc,cpm,ctr,reach,frequency,purchase_roas,website_purchase_roas';
   let campMtd: Map<string, Record<string, any>> = new Map();
   let campDaily: Map<string, Record<string, any>> = new Map();
   let campLm: Map<string, Record<string, any>> = new Map();
@@ -678,6 +932,10 @@ async function refreshFromMeta(
       // row under the wrong (campaign_id, date) key and could overwrite a
       // legitimate prior day. Fall back to UTC-yesterday only if absent.
       const dailyDate = (daily?.date_start as string | undefined) ?? yesterday;
+      const dailyRevenue = pickActionValue(daily?.action_values, PURCHASE_VALUE_TYPES);
+      const dailyRoas =
+        num(daily?.purchase_roas?.[0]?.value ?? daily?.website_purchase_roas?.[0]?.value) ||
+        (dailySpend > 0 ? dailyRevenue / dailySpend : 0);
       metricRows.push({
         campaign_id: c.id,
         client_id: clientId,
@@ -692,6 +950,8 @@ async function refreshFromMeta(
           cpm: num(daily?.cpm),
           ctr: num(daily?.ctr),
           all_actions: dailyActions.all,
+          revenue: dailyRevenue,
+          roas: dailyRoas,
         },
       });
     } catch (e) {

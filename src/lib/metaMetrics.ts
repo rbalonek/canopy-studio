@@ -254,6 +254,81 @@ export function aggregate(rows: CampaignRow[], period: Period = 'this_month'): N
   };
 }
 
+// --- Custom date range (aggregated from campaign_metrics_daily) -----------
+
+/** One row of per-day campaign history. Matches the campaign_metrics_daily
+ * table shape (spend/impressions/clicks/results columns + a `metrics` json blob
+ * carrying cpc/cpm/ctr, the full action map, and — for rows captured after the
+ * revenue enrichment — purchase revenue/roas). */
+export type DailyRow = {
+  date: string;
+  spend?: number | string | null;
+  impressions?: number | string | null;
+  clicks?: number | string | null;
+  results?: number | string | null;
+  metrics?: {
+    all_actions?: Record<string, number | string> | null;
+    revenue?: number | string | null;
+    roas?: number | string | null;
+  } | null;
+};
+
+/** Aggregate per-day rows into the same additive `Norm` the preset periods use,
+ * so an arbitrary date range renders through the identical metric catalog.
+ *
+ * Additive fields (spend, impressions, clicks, revenue, the action map, and the
+ * per-day strategy `results`) sum; ratios/costs recompute from the totals.
+ * Reach/frequency aren't summable across days, so they're left at 0 (shown as
+ * "—" by the views). */
+export function aggregateDaily(rows: DailyRow[]): Norm {
+  let spend = 0;
+  let impressions = 0;
+  let clicks = 0;
+  let revenue = 0;
+  let results = 0;
+  const actions: Record<string, number> = {};
+  for (const r of rows) {
+    spend += nn(r.spend);
+    impressions += nn(r.impressions);
+    clicks += nn(r.clicks);
+    results += nn(r.results);
+    revenue += nn(r.metrics?.revenue);
+    for (const [k, v] of Object.entries(r.metrics?.all_actions ?? {})) {
+      actions[k] = (actions[k] ?? 0) + nn(v);
+    }
+  }
+  const purchases = pick(actions, PURCHASE);
+  const landingPageViews = pick(actions, ['landing_page_view']);
+  const linkClicks = pick(actions, ['link_click']);
+  const leads = pick(actions, LEAD);
+  return {
+    spend,
+    impressions,
+    clicks,
+    reach: 0,
+    frequency: 0,
+    cpc: ratio(spend, clicks),
+    cpm: impressions > 0 ? (spend / impressions) * 1000 : 0,
+    ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
+    roas: ratio(revenue, spend),
+    revenue,
+    results,
+    costPerResult: ratio(spend, results),
+    purchases,
+    purchaseCost: ratio(spend, purchases),
+    landingPageViews,
+    lpvCost: ratio(spend, landingPageViews),
+    linkClicks,
+    linkClickCost: ratio(spend, linkClicks),
+    leads,
+    leadCost: ratio(spend, leads),
+    addToCart: pick(actions, ATC),
+    postEngagement: pick(actions, ENGAGE),
+    videoViews: pick(actions, ['video_view']),
+    actions,
+  };
+}
+
 // --- Metric catalog -------------------------------------------------------
 
 export type MetricFmt = 'currency' | 'number' | 'number2' | 'percent' | 'roas';
@@ -337,6 +412,18 @@ export function prettyAction(type: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+/** Turn a set of present action types into "More actions" count metrics,
+ * excluding those already surfaced by a curated metric. */
+function actionMetricsFromKeys(present: Iterable<string>): MetricDef[] {
+  return [...new Set(present)].sort().map((type) => ({
+    key: `action:${type}`,
+    label: prettyAction(type),
+    group: 'More actions' as MetricGroup,
+    fmt: 'number' as MetricFmt,
+    get: (m: Norm) => m.actions[type] ?? 0,
+  }));
+}
+
 /** Every action type present in the data (for the chosen period) that isn't
  * already a curated metric — turned into count metrics. */
 export function discoverActionMetrics(rows: CampaignRow[], period: Period = 'this_month'): MetricDef[] {
@@ -347,18 +434,25 @@ export function discoverActionMetrics(rows: CampaignRow[], period: Period = 'thi
       if (!COVERED_ACTIONS.has(k) && norm.actions[k] > 0) present.add(k);
     }
   }
-  return [...present].sort().map((type) => ({
-    key: `action:${type}`,
-    label: prettyAction(type),
-    group: 'More actions' as MetricGroup,
-    fmt: 'number' as MetricFmt,
-    get: (m: Norm) => m.actions[type] ?? 0,
-  }));
+  return actionMetricsFromKeys(present);
+}
+
+/** Same discovery, but from an already-aggregated Norm (used by the custom
+ * date-range path, which aggregates daily rows rather than campaign rows). */
+export function discoverActionMetricsFromNorm(norm: Norm): MetricDef[] {
+  const present: string[] = [];
+  for (const [k, v] of Object.entries(norm.actions)) {
+    if (!COVERED_ACTIONS.has(k) && v > 0) present.push(k);
+  }
+  return actionMetricsFromKeys(present);
 }
 
 /** Curated catalog + everything discovered in the data. */
 export function metricsFor(rows: CampaignRow[], period: Period = 'this_month'): MetricDef[] {
   return [...METRICS, ...discoverActionMetrics(rows, period)];
+}
+export function metricsForNorm(norm: Norm): MetricDef[] {
+  return [...METRICS, ...discoverActionMetricsFromNorm(norm)];
 }
 export function indexMetrics(list: MetricDef[]): Record<string, MetricDef> {
   return Object.fromEntries(list.map((m) => [m.key, m]));

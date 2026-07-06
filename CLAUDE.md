@@ -138,6 +138,12 @@ Everything AI runs through one serverless pipeline:
 - **Connectors**: `workspace_connectors` (Resend from-address + Slack
   webhook; owner-only RLS — the webhook is a credential). Senders in
   `_shared/notify.ts`; every attempt logs to `notification_log`.
+- **Saved generations**: Ad Studio's "Save as draft/final" writes the brief +
+  copy to the `generations` table ([`LiveAdStudio.tsx`](src/views/ad-studio/LiveAdStudio.tsx),
+  insert then update the same row). A **Saved generations** list at the top of
+  Ad Studio (per client, `updated_at desc`) reopens a row back into the composer
+  (toggles Reopen/Close without deleting), or deletes it. `PublishPanel` and the
+  publish Edge Function both key off the saved row's `id`.
 - **Publish (2B)**: `publish-meta-ad` creates campaign/adset/creative/ad
   from a saved generation — **always status=PAUSED**, audit trail in
   `ad_publishes`. External client accounts need `ads_management`
@@ -175,9 +181,24 @@ campaigns / ad sets / ads from the Meta Marketing API into the `campaigns`,
   map under Meta's many synonyms — **purchases are usually `omni_purchase`,
   not `purchase`**; `extractPrimaryAction` (backend) and the frontend catalog
   resolve the variants.
-- Request body: `{ client_id, ad_account_id?, location_id? }`. `ad_account_id`
-  scopes the refresh to a single account (validated against the client's own
-  configured accounts); omit it to refresh every account under the client.
+- Request body: `{ client_id, ad_account_id?, location_id?, backfill? }`.
+  `ad_account_id` scopes the refresh to a single account (validated against the
+  client's own configured accounts); omit it to refresh every account under the
+  client.
+- **Historical backfill.** `backfill: { since, until }` (YYYY-MM-DD) switches the
+  function to a history-only path: it does **not** touch the `campaigns`
+  snapshot. It pulls per-day campaign insights (`time_range` + `time_increment=1`,
+  chunked by calendar month via `monthChunks` so each account-level call stays
+  small) and upserts rows into `campaign_metrics_daily` — idempotent via
+  `unique(campaign_id, date)`, so users can pull past periods (this year / last
+  year) for comparison without a full refresh or clobbering today's numbers. The
+  range is clamped to Meta's ~37-month insights retention. Triggered from the
+  **Ad Accounts** tab's "Pull past data" card. Daily rows (nightly + backfill)
+  now also carry `revenue`/`roas` in the `metrics` jsonb so custom ranges have
+  ROAS. Backfill filters day-rows to `campaign_id`s that still exist in
+  `campaigns` before upsert — historical insights reference since-**deleted**
+  campaigns whose ids would violate the `campaign_metrics_daily` FK and abort the
+  batch; those are skipped and the count is surfaced in the result banner.
 
 **Metric display is data-driven** — [`src/lib/metaMetrics.ts`](src/lib/metaMetrics.ts).
 `normalizeCampaign` / `aggregate` turn rows into a period-aware `Norm` (ratios
@@ -187,6 +208,10 @@ present** in the data (custom conversions included) as selectable metrics. The
 campaigns table and client Overview render user-chosen columns/cards through
 `MetricPicker` (selection persisted in localStorage). **Adding a metric = add a
 `MetricDef` to `METRICS`** — the picker and both views pick it up automatically.
+The Overview period toggle also has a **Custom** option: it aggregates
+`campaign_metrics_daily` over an arbitrary date range via `aggregateDaily`
+(→ same `Norm`, same catalog; reach/frequency are non-additive across days so
+they're hidden in this mode) and drives the spend chart from the same rows.
 
 **Editable strategy.** `strategy` is auto-derived from the campaign name /
 objective on every refresh. A user override is saved via the

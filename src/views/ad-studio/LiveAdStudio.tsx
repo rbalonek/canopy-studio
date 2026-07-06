@@ -68,6 +68,11 @@ export function LiveAdStudio({
   const [generationId, setGenerationId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  // Provenance job id preserved when a saved generation is reopened (so a
+  // re-save keeps the original job_id instead of losing it).
+  const [savedJobId, setSavedJobId] = useState<string | null>(null);
+  // Bumped on every successful save/delete so the saved-generations list reloads.
+  const [savedTick, setSavedTick] = useState(0);
 
   const [error, setError] = useState<string | null>(null);
 
@@ -165,7 +170,7 @@ export function LiveAdStudio({
       direction: selectedDirection,
       google_ads: results.google_ads ?? null,
       meta_output: results.meta ?? null,
-      provider_meta: { job_id: copyJobId },
+      provider_meta: { job_id: copyJobId ?? savedJobId },
       status,
       updated_at: new Date().toISOString(),
     };
@@ -180,6 +185,51 @@ export function LiveAdStudio({
     }
     setGenerationId((data?.id as string) ?? generationId);
     setSavedAt(new Date().toLocaleTimeString());
+    setSavedTick((t) => t + 1);
+  }
+
+  /** Load a previously-saved generation back into the composer for editing,
+   * re-saving, or publishing. */
+  function reopen(row: SavedGeneration) {
+    setGenerationId(row.id);
+    setCampaignName(row.campaign_name ?? '');
+    setLandingUrl(row.landing_page_url ?? '');
+    setIdea(row.campaign_idea ?? '');
+    setMedium((row.medium as Medium) ?? 'BOTH');
+    setExtraContext(row.additional_context ?? '');
+    setSelectedDirection((row.direction as Direction | null) ?? null);
+    setDirections(null);
+    setDirectionsJobId(null);
+    // Don't set copyJobId — it would make useJob refetch the original job and
+    // overwrite these (possibly edited) results with the pre-edit copy.
+    setCopyJobId(null);
+    setSavedJobId((row.provider_meta as { job_id?: string } | null)?.job_id ?? null);
+    setResults({
+      google_ads: row.google_ads ?? undefined,
+      meta: row.meta_output ?? undefined,
+    });
+    setSavedAt(null);
+    setError(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  /** Clear the loaded generation out of the composer (toggle-off) without
+   * deleting it — returns the studio to a fresh, blank brief. */
+  function closeComposer() {
+    setGenerationId(null);
+    setResults(null);
+    setSelectedDirection(null);
+    setDirections(null);
+    setDirectionsJobId(null);
+    setCopyJobId(null);
+    setSavedJobId(null);
+    setCampaignName('');
+    setLandingUrl('');
+    setIdea('');
+    setMedium('BOTH');
+    setExtraContext('');
+    setSavedAt(null);
+    setError(null);
   }
 
   if (!workspace) return null;
@@ -199,6 +249,20 @@ export function LiveAdStudio({
             </span>
           </div>
         </div>
+      )}
+
+      {clientId && (
+        <SavedGenerations
+          clientId={clientId}
+          reloadKey={savedTick}
+          currentId={generationId}
+          onReopen={reopen}
+          onClose={closeComposer}
+          onDeleted={(id) => {
+            if (id === generationId) setGenerationId(null);
+            setSavedTick((t) => t + 1);
+          }}
+        />
       )}
 
       {/* ---- Step 1: Brief ---- */}
@@ -488,6 +552,154 @@ export function LiveAdStudio({
             <PublishPanel generationId={generationId} hasLandingUrl={!!landingUrl.trim()} />
           )}
         </>
+      )}
+    </div>
+  );
+}
+
+interface SavedGeneration {
+  id: string;
+  campaign_name: string;
+  landing_page_url: string | null;
+  campaign_idea: string;
+  medium: Medium;
+  additional_context: string | null;
+  direction: Direction | null;
+  google_ads: GenerationResults['google_ads'] | null;
+  meta_output: GenerationResults['meta'] | null;
+  provider_meta: { job_id?: string } | null;
+  status: 'draft' | 'final';
+  created_at: string;
+  updated_at: string;
+}
+
+const SAVED_SELECT =
+  'id, campaign_name, landing_page_url, campaign_idea, medium, additional_context, direction, google_ads, meta_output, provider_meta, status, created_at, updated_at';
+
+/** List of saved generations for the current client. Reopen loads one back into
+ * the composer above; delete removes it. Shown inside Ad Studio so drafting and
+ * revisiting past outputs happen in one place. */
+function SavedGenerations({
+  clientId,
+  reloadKey,
+  currentId,
+  onReopen,
+  onClose,
+  onDeleted,
+}: {
+  clientId: string;
+  reloadKey: number;
+  currentId: string | null;
+  onReopen: (row: SavedGeneration) => void;
+  onClose: () => void;
+  onDeleted: (id: string) => void;
+}) {
+  const [rows, setRows] = useState<SavedGeneration[] | null>(null);
+  const [open, setOpen] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!supabase) return;
+    let cancelled = false;
+    supabase
+      .from('generations')
+      .select(SAVED_SELECT)
+      .eq('client_id', clientId)
+      .order('updated_at', { ascending: false })
+      .then(({ data }) => {
+        if (!cancelled) setRows((data ?? []) as unknown as SavedGeneration[]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId, reloadKey]);
+
+  async function remove(id: string) {
+    if (!supabase) return;
+    if (!confirm('Delete this saved generation? This cannot be undone.')) return;
+    setBusyId(id);
+    const { error } = await supabase.from('generations').delete().eq('id', id);
+    setBusyId(null);
+    if (!error) onDeleted(id);
+  }
+
+  if (!rows || rows.length === 0) return null;
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div
+        className="card-pad row between"
+        style={{ borderBottom: open ? '1px solid var(--border)' : 'none', cursor: 'pointer' }}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <div className="row gap-8">
+          <Icon name="queue" size={14} />
+          <span className="h2">Saved generations</span>
+          <span className="pill gray" style={{ fontSize: 11 }}>
+            {rows.length}
+          </span>
+        </div>
+        <Icon name={open ? 'chev' : 'chevd'} size={14} />
+      </div>
+      {open && (
+        <div className="stack">
+          {rows.map((r) => {
+            const isCurrent = r.id === currentId;
+            return (
+              <div
+                key={r.id}
+                className="card-pad row between"
+                style={{
+                  borderBottom: '1px solid var(--border)',
+                  background: isCurrent ? 'rgba(6,182,164,0.06)' : undefined,
+                  gap: 12,
+                }}
+              >
+                <div className="stack gap-2" style={{ minWidth: 0 }}>
+                  <div className="row gap-8" style={{ alignItems: 'center' }}>
+                    <span style={{ fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {r.campaign_name || r.campaign_idea.slice(0, 60) || 'Untitled'}
+                    </span>
+                    <span className={`pill ${r.status === 'final' ? 'green' : 'gray'}`} style={{ fontSize: 10 }}>
+                      {r.status === 'final' ? 'Final' : 'Draft'}
+                    </span>
+                    {isCurrent && (
+                      <span className="pill teal" style={{ fontSize: 10 }}>
+                        <span className="dot" />
+                        Open
+                      </span>
+                    )}
+                  </div>
+                  <span className="meta" style={{ fontSize: 11 }}>
+                    {MEDIUMS.find((m) => m.id === r.medium)?.label ?? r.medium} · updated{' '}
+                    {new Date(r.updated_at).toLocaleString(undefined, {
+                      month: 'short',
+                      day: 'numeric',
+                      hour: 'numeric',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                </div>
+                <div className="row gap-8" style={{ flexShrink: 0 }}>
+                  <button
+                    className={`btn sm ${isCurrent ? 'primary' : ''}`}
+                    onClick={() => (isCurrent ? onClose() : onReopen(r))}
+                    disabled={busyId === r.id}
+                  >
+                    {isCurrent ? 'Close' : 'Reopen'}
+                  </button>
+                  <button
+                    className="btn ghost sm"
+                    onClick={() => remove(r.id)}
+                    disabled={busyId === r.id}
+                  >
+                    {busyId === r.id ? '…' : 'Delete'}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );
