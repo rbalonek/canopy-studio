@@ -50,8 +50,13 @@ export function useJob<TResult = unknown>(jobId: string | null): {
   running: boolean;
   failed: boolean;
   completed: boolean;
+  /** Eased 0–100 for the UI. Follows real backend progress when it advances
+   * (e.g. collaboration mode's 40/70/100) and otherwise creeps toward a cap so
+   * a single-step job doesn't sit at 0% until it snaps to done. */
+  displayProgress: number;
 } {
   const [job, setJob] = useState<JobRow<TResult> | null>(null);
+  const [displayProgress, setDisplayProgress] = useState(0);
   const timerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -83,11 +88,40 @@ export function useJob<TResult = unknown>(jobId: string | null): {
     };
   }, [jobId]);
 
+  // Reset the eased bar whenever a new job starts.
+  useEffect(() => {
+    setDisplayProgress(0);
+  }, [jobId]);
+
+  // Real backend progress always wins immediately: snap to 100 on completion,
+  // and never show less than what the row reports (collaboration 40/70/100).
+  useEffect(() => {
+    if (!job) return;
+    if (job.status === 'completed') {
+      setDisplayProgress(100);
+      return;
+    }
+    setDisplayProgress((d) => Math.max(d, job.progress));
+  }, [job?.progress, job?.status]);
+
+  // While in flight with no finer signal, ease toward a cap (never reaching
+  // 100 artificially) so the bar always shows forward motion.
+  useEffect(() => {
+    const inFlight = !!job && (job.status === 'pending' || job.status === 'processing');
+    if (!inFlight) return;
+    const CAP = 90;
+    const id = window.setInterval(() => {
+      setDisplayProgress((d) => (d >= CAP ? d : Math.min(CAP, d + Math.max(1, (CAP - d) * 0.08))));
+    }, 500);
+    return () => window.clearInterval(id);
+  }, [job?.status]);
+
   return {
     job,
     running: !!job && (job.status === 'pending' || job.status === 'processing'),
     failed: job?.status === 'failed',
     completed: job?.status === 'completed',
+    displayProgress,
   };
 }
 
@@ -104,6 +138,7 @@ export function useJobRunner<TResult = unknown>(): {
   running: boolean;
   failed: boolean;
   completed: boolean;
+  displayProgress: number;
   startError: string | null;
 } {
   const [jobId, setJobId] = useState<string | null>(null);

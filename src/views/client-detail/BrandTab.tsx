@@ -190,7 +190,7 @@ function LiveBrandTab({ clientId, workspaceId }: { clientId: string; workspaceId
           >
             <Icon name="sparkles" size={12} />
             {analyze.running
-              ? `Analyzing… ${analyze.job?.progress ?? 0}%`
+              ? `Analyzing… ${Math.round(analyze.displayProgress)}%`
               : 'Analyze from website'}
           </button>
           <button className="btn primary sm" disabled={!dirty || saving} onClick={save}>

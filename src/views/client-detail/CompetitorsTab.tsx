@@ -230,7 +230,7 @@ function LiveCompetitorsTab({ clientId, workspaceId }: { clientId: string; works
           busy={busyId === row.id}
           anyBusy={busyId !== null}
           busyLabel={busyId === row.id ? busyLabel : ''}
-          progress={busyId === row.id ? job.job?.progress ?? null : null}
+          progress={busyId === row.id && job.job ? Math.round(job.displayProgress) : null}
           onScrape={() => scrapeAndAnalyze(row)}
           onDelete={() => remove(row)}
           clientId={clientId}
