@@ -1027,12 +1027,31 @@ function parseStrategy(name: string, objective: string): { name: string; expecte
   if (n.includes('traffic'))
     return { name: 'Traffic (Warm-up)', expected: ['landing_page_view', 'link_click'] };
   if (n.includes('video view')) return { name: 'Video Views (Warm-up)', expected: ['video_view'] };
+  if (n.includes('engagement'))
+    return {
+      name: 'Engagement',
+      expected: ['post_engagement', 'page_engagement', 'post_reaction', 'comment', 'onsite_conversion.post_save'],
+    };
   if (n.includes('purchase') || n.includes('sales') || n.includes('conversion'))
-    return { name: 'Purchase', expected: ['offsite_conversion.fb_pixel_purchase', 'purchase'] };
+    return {
+      name: 'Purchase',
+      expected: ['omni_purchase', 'offsite_conversion.fb_pixel_purchase', 'purchase'],
+    };
   if (objective === 'OUTCOME_LEADS' || objective === 'LEAD_GENERATION')
-    return { name: 'Lead Generation', expected: ['offsite_conversion.fb_pixel_lead', 'lead'] };
+    return {
+      name: 'Lead Generation',
+      expected: ['offsite_conversion.fb_pixel_lead', 'lead', 'onsite_conversion.lead_grouped'],
+    };
   if (objective === 'OUTCOME_SALES')
-    return { name: 'Sales', expected: ['offsite_conversion.fb_pixel_purchase', 'purchase'] };
+    return {
+      name: 'Sales',
+      expected: ['omni_purchase', 'offsite_conversion.fb_pixel_purchase', 'purchase'],
+    };
+  if (objective === 'OUTCOME_ENGAGEMENT')
+    return {
+      name: 'Engagement',
+      expected: ['post_engagement', 'page_engagement', 'post_reaction'],
+    };
   if (objective === 'OUTCOME_AWARENESS')
     return { name: 'Awareness', expected: ['video_view', 'post_engagement', 'page_engagement'] };
   if (objective === 'OUTCOME_TRAFFIC')
@@ -1052,21 +1071,35 @@ function extractPrimaryAction(
     if (all[t] > 0) return { type: t, count: all[t], all };
   }
   const priority = [
+    // Purchases — many accounts report the aggregate `omni_purchase` rather
+    // than the pixel-specific type, so it must be checked first.
+    'omni_purchase',
     'offsite_conversion.fb_pixel_purchase',
     'purchase',
+    'onsite_web_purchase',
+    'web_in_store_purchase',
+    // Leads
     'offsite_conversion.fb_pixel_lead',
     'lead',
+    'onsite_conversion.lead_grouped',
+    // Add to cart
+    'omni_add_to_cart',
     'offsite_conversion.fb_pixel_add_to_cart',
     'add_to_cart',
+    // Checkout
+    'omni_initiated_checkout',
     'offsite_conversion.fb_pixel_initiate_checkout',
     'initiate_checkout',
+    // View content
+    'omni_view_content',
     'offsite_conversion.fb_pixel_view_content',
     'view_content',
+    // Traffic / engagement fallbacks
     'landing_page_view',
     'link_click',
     'post_engagement',
-    'video_view',
     'page_engagement',
+    'video_view',
   ];
   for (const t of priority) {
     if (all[t] > 0) return { type: t, count: all[t], all };

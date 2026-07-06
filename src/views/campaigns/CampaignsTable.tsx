@@ -2,26 +2,31 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../auth/supabaseClient';
 import { Status } from '../../components/Status';
+import { MetricPicker, usePersistentSelection } from '../../components/MetricPicker';
+import {
+  DEFAULT_CAMPAIGN_COLUMNS,
+  METRICS_BY_KEY,
+  formatMetric,
+  normalizeCampaign,
+  type CampaignRow,
+} from '../../lib/metaMetrics';
 import { useWorkspace } from '../../workspace/WorkspaceProvider';
 
 /**
  * Live campaigns table — reads from the `campaigns` table that
  * meta-refresh-client writes to. Can be filtered by client_id (show
  * everything under a client across all locations) or by ad_account_id
- * (show just one location's campaigns).
+ * (show just one location's campaigns). Metric columns are user-selectable
+ * (see MetricPicker / metaMetrics) and computed from the stored insight
+ * fields + the full Meta action map.
  */
-type Row = {
+type Row = CampaignRow & {
   id: string;
   client_id: string;
   name: string;
   status: string;
   strategy: string | null;
   ad_account_id: string | null;
-  daily_spend: number;
-  mtd_spend: number;
-  mtd_results: number;
-  mtd_result_type: string | null;
-  mtd_cost_per_result: number;
   last_refreshed_at: string | null;
 };
 
@@ -35,6 +40,7 @@ const STRATEGY_OPTIONS = [
   'Lead Generation',
   'Purchase',
   'Sales',
+  'Engagement',
   'Add to Cart (Warm-up)',
   'View Content (Warm-up)',
   'Video Views (Warm-up)',
@@ -64,11 +70,16 @@ function matchesFilter(status: string, f: StatusFilter): boolean {
   }
 }
 
+const SELECT_COLUMNS =
+  'id, client_id, name, status, strategy, ad_account_id, last_refreshed_at, ' +
+  'mtd_spend, mtd_results, mtd_cost_per_result, impressions, clicks, cpc, cpm, ctr, reach, frequency, roas, all_mtd_actions';
+
 export function CampaignsTable(props: Props) {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [cols, setCols] = usePersistentSelection('canopy.campaignCols', DEFAULT_CAMPAIGN_COLUMNS);
   const navigate = useNavigate();
   const workspace = useWorkspace();
 
@@ -77,12 +88,7 @@ export function CampaignsTable(props: Props) {
       setRows([]);
       return;
     }
-    let query = supabase
-      .from('campaigns')
-      .select(
-        'id, client_id, name, status, strategy, ad_account_id, daily_spend, mtd_spend, mtd_results, mtd_result_type, mtd_cost_per_result, last_refreshed_at',
-      )
-      .order('mtd_spend', { ascending: false });
+    let query = supabase.from('campaigns').select(SELECT_COLUMNS).order('mtd_spend', { ascending: false });
     if ('clientId' in props && props.clientId) {
       query = query.eq('client_id', props.clientId);
     } else if ('adAccountId' in props && props.adAccountId) {
@@ -94,7 +100,7 @@ export function CampaignsTable(props: Props) {
         setRows([]);
         return;
       }
-      setRows((data ?? []) as Row[]);
+      setRows((data ?? []) as unknown as Row[]);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [(props as any).clientId ?? (props as any).adAccountId]);
@@ -148,6 +154,7 @@ export function CampaignsTable(props: Props) {
     if (!latest) return r.last_refreshed_at;
     return r.last_refreshed_at > latest ? r.last_refreshed_at : latest;
   }, null);
+  const metricCols = cols.map((k) => METRICS_BY_KEY[k]).filter(Boolean);
 
   return (
     <div className="card">
@@ -172,17 +179,20 @@ export function CampaignsTable(props: Props) {
             )}
           </span>
         </div>
-        <div className="seg">
-          {STATUS_FILTERS.map((f) => (
-            <button
-              key={f.id}
-              className={statusFilter === f.id ? 'on' : ''}
-              onClick={() => setStatusFilter(f.id)}
-              style={{ padding: '4px 12px', fontSize: 12 }}
-            >
-              {f.label}
-            </button>
-          ))}
+        <div className="row gap-8" style={{ flexWrap: 'wrap' }}>
+          <div className="seg">
+            {STATUS_FILTERS.map((f) => (
+              <button
+                key={f.id}
+                className={statusFilter === f.id ? 'on' : ''}
+                onClick={() => setStatusFilter(f.id)}
+                style={{ padding: '4px 12px', fontSize: 12 }}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <MetricPicker selected={cols} onChange={setCols} label="Columns" />
         </div>
       </div>
       <div style={{ overflowX: 'auto' }}>
@@ -192,16 +202,17 @@ export function CampaignsTable(props: Props) {
               <th>Name</th>
               <th>Status</th>
               <th>Strategy</th>
-              <th style={{ textAlign: 'right' }}>MTD Spend</th>
-              <th style={{ textAlign: 'right' }}>MTD Results</th>
-              <th style={{ textAlign: 'right' }}>Cost / result</th>
-              <th style={{ textAlign: 'right' }}>Yesterday spend</th>
+              {metricCols.map((m) => (
+                <th key={m.key} style={{ textAlign: 'right' }}>
+                  {m.label}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {visible.length === 0 && (
               <tr>
-                <td colSpan={7} className="meta" style={{ textAlign: 'center', padding: 24 }}>
+                <td colSpan={3 + metricCols.length} className="meta" style={{ textAlign: 'center', padding: 24 }}>
                   No {statusFilter === 'all' ? '' : `${statusFilter} `}campaigns.
                 </td>
               </tr>
@@ -210,6 +221,7 @@ export function CampaignsTable(props: Props) {
               const prefix = workspace ? `/app/${workspace.slug}` : '/dev';
               const openCampaign = () =>
                 navigate(`${prefix}/clients/${r.client_id}/campaigns/${r.id}`);
+              const norm = normalizeCampaign(r);
               return (
                 <tr key={r.id} onClick={openCampaign} style={{ cursor: 'pointer' }}>
                   <td>
@@ -263,21 +275,14 @@ export function CampaignsTable(props: Props) {
                       </span>
                     )}
                   </td>
-                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                    ${fmt(r.mtd_spend)}
-                  </td>
-                  <td
-                    style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}
-                    title={r.mtd_result_type ?? undefined}
-                  >
-                    {fmt(r.mtd_results, 0)}
-                  </td>
-                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                    {r.mtd_results > 0 ? `$${fmt(r.mtd_cost_per_result)}` : '—'}
-                  </td>
-                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                    ${fmt(r.daily_spend)}
-                  </td>
+                  {metricCols.map((m) => (
+                    <td
+                      key={m.key}
+                      style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}
+                    >
+                      {formatMetric(m.fmt, m.get(norm))}
+                    </td>
+                  ))}
                 </tr>
               );
             })}
@@ -286,15 +291,6 @@ export function CampaignsTable(props: Props) {
       </div>
     </div>
   );
-}
-
-function fmt(n: number | string | null | undefined, digits = 2): string {
-  const v = typeof n === 'string' ? parseFloat(n) : (n ?? 0);
-  if (!Number.isFinite(v)) return '0';
-  return v.toLocaleString(undefined, {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  });
 }
 
 function mapStatus(s: string): 'Active' | 'Paused' | 'Draft' | 'Error' {

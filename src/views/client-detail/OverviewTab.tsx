@@ -1,7 +1,15 @@
 import { useEffect, useState } from 'react';
 import { AreaChart } from '../../components/AreaChart';
 import { KPI } from '../../components/KPI';
+import { MetricPicker, usePersistentSelection } from '../../components/MetricPicker';
 import { supabase } from '../../auth/supabaseClient';
+import {
+  DEFAULT_OVERVIEW_CARDS,
+  METRICS_BY_KEY,
+  aggregate,
+  formatMetric,
+  type CampaignRow,
+} from '../../lib/metaMetrics';
 import { useQuery } from '../../data/context';
 import { useWorkspace } from '../../workspace/WorkspaceProvider';
 import type { ClientKpis } from '../../data/types';
@@ -13,34 +21,29 @@ export function OverviewTab({ clientId }: { clientId: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Live: KPIs aggregated from the client's real campaigns + a spend-over-time
-// series from campaign_metrics_daily. This is what the Ad Accounts tab writes.
+// Live: account-total metric cards (user-selectable) aggregated from the
+// client's real campaigns + a spend-over-time series from campaign_metrics_daily.
 // ---------------------------------------------------------------------------
 
-type Agg = {
-  spend: number;
-  results: number;
-  revenue: number;
-  activeCount: number;
-  campaignCount: number;
-};
+type LiveRow = CampaignRow & { status?: string };
+
+const OVERVIEW_SELECT =
+  'status, mtd_spend, mtd_results, mtd_cost_per_result, impressions, clicks, cpc, cpm, ctr, reach, frequency, roas, all_mtd_actions';
 
 function LiveOverviewTab({ clientId }: { clientId: string }) {
-  const [agg, setAgg] = useState<Agg | null | undefined>(undefined);
+  const [rows, setRows] = useState<LiveRow[] | null | undefined>(undefined);
   const [daily, setDaily] = useState<{ date: string; spend: number }[]>([]);
+  const [cards, setCards] = usePersistentSelection('canopy.overviewCards', DEFAULT_OVERVIEW_CARDS);
 
   useEffect(() => {
     if (!supabase) {
-      setAgg(null);
+      setRows(null);
       return;
     }
     let cancelled = false;
     (async () => {
       const [{ data: camps }, { data: hist }] = await Promise.all([
-        supabase!
-          .from('campaigns')
-          .select('status, mtd_spend, mtd_results, roas')
-          .eq('client_id', clientId),
+        supabase!.from('campaigns').select(OVERVIEW_SELECT).eq('client_id', clientId),
         supabase!
           .from('campaign_metrics_daily')
           .select('date, spend')
@@ -48,23 +51,8 @@ function LiveOverviewTab({ clientId }: { clientId: string }) {
           .order('date', { ascending: true }),
       ]);
       if (cancelled) return;
-      const a: Agg = {
-        spend: 0,
-        results: 0,
-        revenue: 0,
-        activeCount: 0,
-        campaignCount: (camps ?? []).length,
-      };
-      for (const c of camps ?? []) {
-        const spend = num(c.mtd_spend);
-        a.spend += spend;
-        a.results += num(c.mtd_results);
-        a.revenue += spend * num(c.roas);
-        if (c.status === 'ACTIVE') a.activeCount += 1;
-      }
-      setAgg(a);
+      setRows((camps ?? []) as unknown as LiveRow[]);
 
-      // Total spend per date across all of the client's campaigns.
       const byDate = new Map<string, number>();
       for (const r of hist ?? []) {
         const d = r.date as string;
@@ -81,8 +69,8 @@ function LiveOverviewTab({ clientId }: { clientId: string }) {
     };
   }, [clientId]);
 
-  if (agg === undefined) return <div className="meta">Loading…</div>;
-  if (!agg || agg.campaignCount === 0) {
+  if (rows === undefined) return <div className="meta">Loading…</div>;
+  if (!rows || rows.length === 0) {
     return (
       <div className="card card-pad stack gap-6">
         <span style={{ fontWeight: 500 }}>No campaign data yet</span>
@@ -94,20 +82,23 @@ function LiveOverviewTab({ clientId }: { clientId: string }) {
     );
   }
 
-  const roas = agg.spend > 0 ? agg.revenue / agg.spend : 0;
-  const cpr = agg.results > 0 ? agg.spend / agg.results : 0;
+  const agg = aggregate(rows);
+  const activeCount = rows.filter((r) => r.status === 'ACTIVE').length;
+  const cardDefs = cards.map((k) => METRICS_BY_KEY[k]).filter(Boolean);
 
   return (
     <>
-      <div className="meta" style={{ marginBottom: 8 }}>
-        {agg.activeCount} active · {agg.campaignCount} total{' '}
-        {agg.campaignCount === 1 ? 'campaign' : 'campaigns'} · month to date
+      <div className="row between" style={{ marginBottom: 8, alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <span className="meta">
+          {activeCount} active · {rows.length} total {rows.length === 1 ? 'campaign' : 'campaigns'} ·
+          month to date
+        </span>
+        <MetricPicker selected={cards} onChange={setCards} label="Cards" />
       </div>
       <div className="grid grid-4 gap-16" style={{ gap: 16, marginBottom: 16 }}>
-        <KPI label="Spend MTD" value={`$${money(agg.spend)}`} noData />
-        <KPI label="Results MTD" value={money(agg.results, 0)} noData />
-        <KPI label="ROAS" value={roas > 0 ? `${roas.toFixed(2)}×` : '—'} noData />
-        <KPI label="Cost / result" value={cpr > 0 ? `$${money(cpr)}` : '—'} noData />
+        {cardDefs.map((m) => (
+          <KPI key={m.key} label={m.label} value={formatMetric(m.fmt, m.get(agg))} noData />
+        ))}
       </div>
       <div className="card">
         <div className="card-pad" style={{ borderBottom: '1px solid var(--border)' }}>
@@ -166,14 +157,8 @@ function SpendArea({ data, h }: { data: { date: string; spend: number }[]; h: nu
 }
 
 function num(v: unknown): number {
-  const n = typeof v === 'string' ? parseFloat(v) : (v as number);
-  return Number.isFinite(n) ? n : 0;
-}
-function money(v: number, digits = 2): string {
-  return v.toLocaleString(undefined, {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  });
+  const x = typeof v === 'string' ? parseFloat(v) : (v as number);
+  return Number.isFinite(x) ? x : 0;
 }
 
 // ---------------------------------------------------------------------------
