@@ -402,6 +402,14 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 # JSON string passed through to pg-delta SQL formatting.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":80,\"commaStyle\":\"trailing\"}"
 
+# cron-dispatch is invoked only by pg_cron (via net.http_post) and by
+# sibling functions — never from a browser. pg_cron sends the shared
+# X-Internal-Secret but no JWT-shaped Authorization header, so the gateway
+# JWT check must be off here; isInternalCall() is the real gate (403 otherwise).
+[functions.cron-dispatch]
+enabled = true
+verify_jwt = false
+
 [functions.meta-refresh-client]
 enabled = true
 verify_jwt = true
