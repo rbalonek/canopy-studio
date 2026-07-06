@@ -64,9 +64,17 @@ function LiveBrandTab({ clientId, workspaceId }: { clientId: string; workspaceId
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const analyze = useJobRunner();
+  // Transient "✓ Saved" confirmation after a successful save.
+  const [saved, setSaved] = useState(false);
+  const savedTimer = useRef<number | null>(null);
   // Guards against a slow load for a previous clientId (or an overlapping
   // load() from the analyze-completed effect) applying over newer data.
   const loadToken = useRef(0);
+
+  // Clear the "Saved" timer on unmount.
+  useEffect(() => () => {
+    if (savedTimer.current !== null) window.clearTimeout(savedTimer.current);
+  }, []);
 
   async function load() {
     if (!supabase) return;
@@ -160,6 +168,10 @@ function LiveBrandTab({ clientId, workspaceId }: { clientId: string; workspaceId
     setBaselinePalette(palette);
     setBaselineFonts(fonts);
     setExists(true);
+    // Flash "✓ Saved" for a couple of seconds.
+    setSaved(true);
+    if (savedTimer.current !== null) window.clearTimeout(savedTimer.current);
+    savedTimer.current = window.setTimeout(() => setSaved(false), 2500);
   }
 
   if (loading) return <div className="meta">Loading…</div>;
@@ -193,7 +205,23 @@ function LiveBrandTab({ clientId, workspaceId }: { clientId: string; workspaceId
               ? `Analyzing… ${Math.round(analyze.displayProgress)}%`
               : 'Analyze from website'}
           </button>
-          <button className="btn primary sm" disabled={!dirty || saving} onClick={save}>
+          {saved && !dirty && (
+            <span
+              className="meta"
+              style={{ color: 'var(--success, #16a34a)', fontWeight: 600, whiteSpace: 'nowrap' }}
+            >
+              ✓ Saved
+            </span>
+          )}
+          <button
+            className="btn primary sm"
+            disabled={!dirty || saving}
+            onClick={save}
+            style={{
+              opacity: !dirty || saving ? 0.5 : 1,
+              cursor: !dirty || saving ? 'default' : 'pointer',
+            }}
+          >
             {saving ? 'Saving…' : 'Save changes'}
           </button>
         </div>
