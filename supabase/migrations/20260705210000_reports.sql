@@ -22,12 +22,34 @@ alter table report_settings enable row level security;
 create policy "report_settings read for members" on report_settings
   for select to authenticated using (is_workspace_member(workspace_id));
 
+-- The client_id must belong to the stated workspace, not just any workspace
+-- the caller is a member of. Without the clients-join a member of workspace A
+-- could insert a report pointed at a workspace-B client and exfiltrate its
+-- metrics to arbitrary recipients (send_report reads campaign_metrics_daily by
+-- client_id with the service role, bypassing RLS).
 create policy "report_settings insert for members" on report_settings
-  for insert to authenticated with check (is_workspace_member(workspace_id));
+  for insert to authenticated with check (
+    is_workspace_member(workspace_id)
+    and exists (
+      select 1 from clients c
+      where c.id = report_settings.client_id and c.workspace_id = report_settings.workspace_id
+    )
+  );
 
 create policy "report_settings update for members" on report_settings
-  for update to authenticated using (is_workspace_member(workspace_id))
-  with check (is_workspace_member(workspace_id));
+  for update to authenticated using (
+    is_workspace_member(workspace_id)
+    and exists (
+      select 1 from clients c
+      where c.id = report_settings.client_id and c.workspace_id = report_settings.workspace_id
+    )
+  ) with check (
+    is_workspace_member(workspace_id)
+    and exists (
+      select 1 from clients c
+      where c.id = report_settings.client_id and c.workspace_id = report_settings.workspace_id
+    )
+  );
 
 create policy "report_settings delete for members" on report_settings
   for delete to authenticated using (is_workspace_member(workspace_id));
