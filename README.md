@@ -97,7 +97,8 @@ See [`.env.example`](.env.example). Notable:
 │   ├── routes.ts                ← prefix-agnostic route table + sidebar metadata
 │   ├── shell/                   ← AppShell, Sidebar, Topbar, AppState
 │   ├── data/                    ← types, mock, provider interface, providers
-│   ├── components/              ← shared primitives (Icon, KPI, AdThumb, …)
+│   ├── components/              ← shared primitives (Icon, KPI, MetricPicker, …)
+│   ├── lib/                     ← framework-free helpers (metaMetrics: metric catalog)
 │   └── views/                   ← one file per route (sub-folders for tabbed views)
 ├── supabase/
 │   ├── config.toml              ← local stack config
@@ -139,3 +140,12 @@ migration, add the seed insert, and override the method in
 **Switch the app between local & hosted Supabase** — edit two lines in
 `.env.local` (`VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`),
 restart the dev server.
+
+**Add a Meta metric** — add a `MetricDef` to `METRICS` in
+[`src/lib/metaMetrics.ts`](src/lib/metaMetrics.ts). The campaigns table, the
+client Overview, and the metric picker all pick it up automatically. Values
+come from the period-aware `Norm` (built from `campaigns.metrics_by_period` —
+this month / last month / last 30 days — plus the full Meta action map). Every
+action type present in the data is already auto-discovered as a selectable
+metric, so you only add a `MetricDef` for a *derived* metric (a ratio,
+cost-per, or a friendly-named rollup). See CLAUDE.md → *Meta refresh & metrics*.

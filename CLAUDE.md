@@ -155,6 +155,52 @@ Everything AI runs through one serverless pipeline:
   `cron.job_run_details` and the AI tabs surface "not configured"
   errors.
 
+## Meta refresh & metrics
+
+[`meta-refresh-client`](supabase/functions/meta-refresh-client/index.ts) pulls
+campaigns / ad sets / ads from the Meta Marketing API into the `campaigns`,
+`ad_sets`, `ads` tables. Before touching it:
+
+- **All calls are account-level and batched.** One paginated list call per
+  level (`/act_/campaigns|adsets|ads`) + account-level `/insights?level=…`
+  keyed by node id — **not** one call per campaign/ad set. The old per-node
+  fan-out tripped Meta's per-account rate limit on large accounts, and backoff
+  can't absorb minutes-long limit windows inside the ~150s function budget.
+  `metaFetch` adds a short rate-limit retry as a backstop. Keep it
+  account-level; don't reintroduce per-node loops.
+- **Multi-period.** Campaign insights are fetched for `this_month`,
+  `last_month`, and `last_30d` and stored on `campaigns.metrics_by_period`
+  (`{ period: { spend, impressions, …, roas, actions: {action_type: count} } }`).
+  Flat `mtd_*` columns stay for compatibility. Conversions live in the action
+  map under Meta's many synonyms — **purchases are usually `omni_purchase`,
+  not `purchase`**; `extractPrimaryAction` (backend) and the frontend catalog
+  resolve the variants.
+- Request body: `{ client_id, ad_account_id?, location_id? }`. `ad_account_id`
+  scopes the refresh to a single account (validated against the client's own
+  configured accounts); omit it to refresh every account under the client.
+
+**Metric display is data-driven** — [`src/lib/metaMetrics.ts`](src/lib/metaMetrics.ts).
+`normalizeCampaign` / `aggregate` turn rows into a period-aware `Norm` (ratios
+and cost-per are recomputed from totals, never averaged); `METRICS` is the
+catalog and `metricsFor(rows, period)` also **auto-discovers every action type
+present** in the data (custom conversions included) as selectable metrics. The
+campaigns table and client Overview render user-chosen columns/cards through
+`MetricPicker` (selection persisted in localStorage). **Adding a metric = add a
+`MetricDef` to `METRICS`** — the picker and both views pick it up automatically.
+
+**Editable strategy.** `strategy` is auto-derived from the campaign name /
+objective on every refresh. A user override is saved via the
+`set_campaign_strategy(campaign_id, strategy)` RPC (SECURITY DEFINER,
+membership-checked, only touches strategy) which sets
+`campaigns.strategy_custom = true`; the refresh then preserves that row's
+strategy instead of re-deriving it.
+
+**config.toml gotcha:** `cron-dispatch` must have `verify_jwt = false` — it's
+invoked only by pg_cron, which sends `X-Internal-Secret` but no JWT-shaped
+`Authorization` header, so the gateway would 401 it otherwise. `isInternalCall`
+is the real gate. Sibling functions invoked via `invokeInternal` pass a
+service-role Bearer, so they keep `verify_jwt = true`.
+
 ## Useful commands
 
 ```bash
@@ -171,8 +217,17 @@ docker exec supabase_db_canopystudio psql -U postgres -c '...'
 
 # Hosted Supabase (linked to project iklouyjenajyagccymaj)
 supabase db push                                       # migrations
+supabase functions deploy [<name>]                     # deploy fn(s); no Docker needed
 supabase db query --linked --file supabase/seed.sql    # seed
-supabase db query --linked --output table 'select ...' # ad-hoc
+supabase db query --linked --output table 'select ...' # ad-hoc (works when the Supabase MCP is down)
+
+# Smoke-test an Edge Function via the internal path (no browser session).
+# The gateway needs a JWT-shaped Authorization header (verify_jwt); the code
+# trusts X-Internal-Secret. ANON_JWT = the legacy anon key; must match INTERNAL_FN_SECRET.
+curl -s -X POST "https://<ref>.supabase.co/functions/v1/meta-refresh-client" \
+  -H "Authorization: Bearer $ANON_JWT" \
+  -H "X-Internal-Secret: $INTERNAL_FN_SECRET" \
+  -d '{"client_id":"..."}'
 ```
 
 ## Meta publishing features (confirmed API-capable)
