@@ -43,6 +43,10 @@ interface RefreshRequest {
   /** Optional — refresh just this location's ad account instead of every
    * location under the client. */
   location_id?: string;
+  /** Optional — refresh only this specific ad account (must be one of the
+   * client's configured accounts). Narrows the refresh to the single account
+   * the user acted on instead of fanning out over all of them. */
+  ad_account_id?: string;
 }
 
 interface RefreshResult {
@@ -158,10 +162,25 @@ Deno.serve(async (req) => {
       );
     }
 
-    // 3. Pull campaigns for each ad account.
+    // If the caller named a specific ad account, refresh only that one — but
+    // only if it's actually one of this client's configured accounts (so a
+    // member can't refresh an arbitrary account through this endpoint).
+    let targetAccounts = adAccountIds;
+    if (body.ad_account_id) {
+      const want = sanitizeAdAccountId(body.ad_account_id);
+      targetAccounts = adAccountIds.filter((id) => id === want);
+      if (targetAccounts.length === 0) {
+        return json(
+          { ok: false, error: 'That ad account is not configured for this client.' },
+          400,
+        );
+      }
+    }
+
+    // 3. Pull campaigns for each targeted ad account.
     const summary = await refreshAllAdAccounts(
       body.client_id,
-      adAccountIds,
+      targetAccounts,
       accessToken,
       serviceClient,
     );
@@ -271,6 +290,236 @@ async function refreshAllAdAccounts(
   };
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** True for Meta responses that mean "you're calling too fast" — code 4/17/32/
+ * 613 or the various rate-limit subcodes/messages. */
+function isRateLimit(status: number, body: string): boolean {
+  if (![400, 429, 403, 500].includes(status)) return false;
+  try {
+    const err = JSON.parse(body).error;
+    if (!err) return /rate limit|request limit|too many/i.test(body);
+    if ([4, 17, 32, 613, 80000, 80004].includes(err.code)) return true;
+    if ([2446079, 1487742].includes(err.error_subcode)) return true;
+    return /rate limit|request limit|reduce the amount|too many/i.test(err.message ?? '');
+  } catch {
+    return /rate limit|request limit|too many/i.test(body);
+  }
+}
+
+/** fetch() with a short backoff+retry on Meta rate-limit responses. Kept brief
+ * (few calls now that everything is account-level) so a full refresh still fits
+ * the Edge Function wall-clock budget. */
+async function metaFetch(url: string): Promise<Response> {
+  const MAX = 3;
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url);
+    if (res.ok || attempt >= MAX) return res;
+    const body = await res.clone().text().catch(() => '');
+    if (!isRateLimit(res.status, body)) return res;
+    await sleep(4000 * (attempt + 1));
+  }
+}
+
+/** Follow Meta paging.next across all pages of an edge, returning the flattened
+ * `data` rows. Throws a formatted error (incl. the rate-limit hint) on failure. */
+// deno-lint-ignore no-explicit-any
+async function fetchAllPages(url: URL, label: string): Promise<any[]> {
+  // deno-lint-ignore no-explicit-any
+  const out: any[] = [];
+  let next: string | null = url.toString();
+  let guard = 0;
+  while (next && guard < 25) {
+    guard++;
+    const res = await metaFetch(next);
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(formatMetaError(`${label} ${res.status}`, body));
+    }
+    const j = await res.json();
+    for (const row of j.data ?? []) out.push(row);
+    next = (j.paging?.next as string | undefined) ?? null;
+  }
+  return out;
+}
+
+/** ONE account-level insights call per (level, preset), keyed by node id.
+ * Replaces the previous per-node /insights fan-out that tripped Meta's
+ * per-account rate limit on larger accounts. */
+async function getAccountInsights(
+  acct: string,
+  level: 'campaign' | 'adset' | 'ad',
+  datePreset: string,
+  fields: string,
+  accessToken: string,
+  // deno-lint-ignore no-explicit-any
+): Promise<Map<string, Record<string, any>>> {
+  const idField = level === 'campaign' ? 'campaign_id' : level === 'adset' ? 'adset_id' : 'ad_id';
+  const url = new URL(`${META_GRAPH}/${acct}/insights`);
+  url.searchParams.set('level', level);
+  url.searchParams.set('fields', `${idField},${fields},date_start`);
+  url.searchParams.set('date_preset', datePreset);
+  url.searchParams.set('limit', '500');
+  url.searchParams.set('access_token', accessToken);
+  const rows = await fetchAllPages(url, `/insights ${level}`);
+  // deno-lint-ignore no-explicit-any
+  const map = new Map<string, Record<string, any>>();
+  for (const r of rows) {
+    const id = r[idField] as string | undefined;
+    if (id) map.set(id, r);
+  }
+  return map;
+}
+
+/** Ad sets + ads for the whole account in a handful of batched calls: one list
+ * call per level (paginated) and two account-level insights calls per level —
+ * NOT one /adsets call per campaign and one /ads call per ad set (that fan-out
+ * is what Meta rate-limited). Preserves FK ordering: ad_sets before ads. */
+async function refreshAdSetsAndAds(
+  acct: string,
+  clientId: string,
+  campaignIds: Set<string>,
+  accessToken: string,
+  service: ReturnType<typeof createClient>,
+): Promise<string[]> {
+  const errors: string[] = [];
+  const now = new Date().toISOString();
+  const NODE_FIELDS = 'spend,impressions,clicks,actions,cpc,cpm,ctr';
+
+  // --- Ad sets: one list call + two insights calls ---
+  const adsetsUrl = new URL(`${META_GRAPH}/${acct}/adsets`);
+  adsetsUrl.searchParams.set('fields', 'id,name,status,optimization_goal,campaign_id');
+  adsetsUrl.searchParams.set('access_token', accessToken);
+  adsetsUrl.searchParams.set('limit', '500');
+  const allAdSets = await fetchAllPages(adsetsUrl, '/adsets');
+  const adSets = allAdSets.filter(
+    (a) => a.status !== 'ARCHIVED' && a.status !== 'DELETED' && campaignIds.has(a.campaign_id),
+  );
+
+  const [asMtd, asDaily] = await Promise.all([
+    getAccountInsights(acct, 'adset', 'this_month', NODE_FIELDS, accessToken),
+    getAccountInsights(acct, 'adset', 'yesterday', NODE_FIELDS, accessToken),
+  ]);
+
+  const adSetIds = new Set<string>();
+  const adSetRows = adSets.map((a) => {
+    adSetIds.add(a.id);
+    const mtd = asMtd.get(a.id) ?? null;
+    const daily = asDaily.get(a.id) ?? null;
+    const mtdActions = extractPrimaryAction(mtd?.actions, []);
+    const dailyActions = extractPrimaryAction(daily?.actions, []);
+    const mtdSpend = num(mtd?.spend);
+    const dailySpend = num(daily?.spend);
+    return {
+      id: a.id,
+      campaign_id: a.campaign_id,
+      client_id: clientId,
+      ad_account_id: acct,
+      name: a.name,
+      status: a.status,
+      optimization_goal: a.optimization_goal ?? null,
+      daily_spend: dailySpend,
+      mtd_spend: mtdSpend,
+      daily_results: dailyActions.count,
+      daily_result_type: dailyActions.type,
+      daily_cost_per_result: dailyActions.count > 0 ? dailySpend / dailyActions.count : 0,
+      mtd_results: mtdActions.count,
+      mtd_result_type: mtdActions.type,
+      mtd_cost_per_result: mtdActions.count > 0 ? mtdSpend / mtdActions.count : 0,
+      all_daily_actions: dailyActions.all,
+      all_mtd_actions: mtdActions.all,
+      impressions: num(mtd?.impressions),
+      clicks: num(mtd?.clicks),
+      cpc: num(mtd?.cpc),
+      cpm: num(mtd?.cpm),
+      ctr: num(mtd?.ctr),
+      last_refreshed_at: now,
+      updated_at: now,
+    };
+  });
+
+  if (adSetRows.length > 0) {
+    const { error } = await service.from('ad_sets').upsert(adSetRows, { onConflict: 'id' });
+    if (error) {
+      // ads FK-reference ad_sets, so a failed ad_sets write means we must not
+      // attempt the ads write.
+      errors.push(`ad_sets upsert: ${error.message}`);
+      return errors;
+    }
+  }
+
+  // --- Ads: one list call (creative expanded inline) + two insights calls ---
+  const adsUrl = new URL(`${META_GRAPH}/${acct}/ads`);
+  adsUrl.searchParams.set(
+    'fields',
+    'id,name,status,adset_id,campaign_id,creative{id,image_url,thumbnail_url,object_story_spec,asset_feed_spec,call_to_action_type}',
+  );
+  adsUrl.searchParams.set('access_token', accessToken);
+  adsUrl.searchParams.set('limit', '300');
+  const allAds = await fetchAllPages(adsUrl, '/ads');
+  const ads = allAds.filter(
+    (a) => a.status !== 'ARCHIVED' && a.status !== 'DELETED' && adSetIds.has(a.adset_id),
+  );
+
+  const [adMtd, adDaily] = await Promise.all([
+    getAccountInsights(acct, 'ad', 'this_month', NODE_FIELDS, accessToken),
+    getAccountInsights(acct, 'ad', 'yesterday', NODE_FIELDS, accessToken),
+  ]);
+
+  const adRows = ads.map((a) => {
+    const mtd = adMtd.get(a.id) ?? null;
+    const daily = adDaily.get(a.id) ?? null;
+    const mtdActions = extractPrimaryAction(mtd?.actions, []);
+    const dailyActions = extractPrimaryAction(daily?.actions, []);
+    const mtdSpend = num(mtd?.spend);
+    const dailySpend = num(daily?.spend);
+    const creative = parseCreative(a.creative);
+    return {
+      id: a.id,
+      ad_set_id: a.adset_id,
+      campaign_id: a.campaign_id,
+      client_id: clientId,
+      ad_account_id: acct,
+      name: a.name,
+      status: a.status,
+      daily_spend: dailySpend,
+      mtd_spend: mtdSpend,
+      daily_results: dailyActions.count,
+      daily_result_type: dailyActions.type,
+      daily_cost_per_result: dailyActions.count > 0 ? dailySpend / dailyActions.count : 0,
+      mtd_results: mtdActions.count,
+      mtd_result_type: mtdActions.type,
+      mtd_cost_per_result: mtdActions.count > 0 ? mtdSpend / mtdActions.count : 0,
+      all_daily_actions: dailyActions.all,
+      all_mtd_actions: mtdActions.all,
+      impressions: num(mtd?.impressions),
+      clicks: num(mtd?.clicks),
+      cpc: num(mtd?.cpc),
+      cpm: num(mtd?.cpm),
+      ctr: num(mtd?.ctr),
+      creative_id: creative.id,
+      destination_url: creative.destination_url,
+      headline: creative.headline,
+      body: creative.body,
+      thumbnail_url: creative.thumbnail_url,
+      image_url: creative.image_url,
+      call_to_action: creative.call_to_action,
+      creative_raw: a.creative ?? null,
+      last_refreshed_at: now,
+      updated_at: now,
+    };
+  });
+
+  if (adRows.length > 0) {
+    const { error } = await service.from('ads').upsert(adRows, { onConflict: 'id' });
+    if (error) errors.push(`ads upsert: ${error.message}`);
+  }
+
+  return errors;
+}
+
 async function refreshFromMeta(
   clientId: string,
   adAccountId: string,
@@ -280,37 +529,45 @@ async function refreshFromMeta(
   const acct = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
   const errors: string[] = [];
 
-  // List campaigns for the ad account
+  // List campaigns for the ad account (paginated).
   const campaignsUrl = new URL(`${META_GRAPH}/${acct}/campaigns`);
   campaignsUrl.searchParams.set('fields', 'id,name,status,objective');
   campaignsUrl.searchParams.set('access_token', accessToken);
-  campaignsUrl.searchParams.set('limit', '100');
-
-  const listRes = await fetch(campaignsUrl);
-  if (!listRes.ok) {
-    const errText = await listRes.text();
-    return { ok: false, error: `Meta /campaigns failed (${listRes.status}): ${errText}` };
+  campaignsUrl.searchParams.set('limit', '200');
+  let campaigns: Array<{ id: string; name: string; status: string; objective: string }> = [];
+  try {
+    campaigns = (await fetchAllPages(campaignsUrl, '/campaigns')) as any;
+  } catch (e) {
+    return { ok: false, error: `Meta /campaigns failed: ${(e as Error).message}` };
   }
-  const listJson = await listRes.json();
-  const campaigns = (listJson.data ?? []) as Array<{
-    id: string;
-    name: string;
-    status: string;
-    objective: string;
-  }>;
+
+  // Campaign insights in TWO account-level calls (this_month + yesterday),
+  // keyed by campaign id — not one /insights call per campaign.
+  const CAMPAIGN_INSIGHT_FIELDS =
+    'spend,impressions,clicks,actions,cpc,cpm,ctr,reach,frequency,purchase_roas,website_purchase_roas';
+  let campMtd: Map<string, Record<string, any>> = new Map();
+  let campDaily: Map<string, Record<string, any>> = new Map();
+  try {
+    [campMtd, campDaily] = await Promise.all([
+      getAccountInsights(acct, 'campaign', 'this_month', CAMPAIGN_INSIGHT_FIELDS, accessToken),
+      getAccountInsights(acct, 'campaign', 'yesterday', CAMPAIGN_INSIGHT_FIELDS, accessToken),
+    ]);
+  } catch (e) {
+    return { ok: false, error: `Meta campaign insights failed: ${(e as Error).message}` };
+  }
 
   const now = new Date().toISOString();
   const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
   const rows: any[] = [];
   const metricRows: any[] = [];
 
+  const campaignIds = new Set<string>();
   for (const c of campaigns) {
     try {
-      // MTD + yesterday insights for this campaign
-      const [mtd, daily] = await Promise.all([
-        getInsights(c.id, 'this_month', accessToken),
-        getInsights(c.id, 'yesterday', accessToken),
-      ]);
+      campaignIds.add(c.id);
+      // Insights come from the account-level maps fetched above.
+      const mtd = campMtd.get(c.id) ?? null;
+      const daily = campDaily.get(c.id) ?? null;
 
       const strategy = parseStrategy(c.name, c.objective);
       const mtdActions = extractPrimaryAction(mtd?.actions, strategy.expected);
@@ -398,22 +655,13 @@ async function refreshFromMeta(
     if (histErr) errors.push(`daily metrics: ${histErr.message}`);
   }
 
-  // For each campaign, pull ad sets, then for each ad set pull ads.
-  // Per-set errors land in summary.errors so a rate limit on one node
-  // doesn't abort the rest of the batch.
-  for (const c of campaigns) {
-    try {
-      const { errors: adErrors } = await refreshAdSetsForCampaign(
-        c.id,
-        clientId,
-        acct,
-        accessToken,
-        service,
-      );
-      if (adErrors.length) errors.push(...adErrors.map((e) => `${c.name}: ${e}`));
-    } catch (e) {
-      errors.push(`ad_sets for ${c.name}: ${(e as Error).message}`);
-    }
+  // Ad sets + ads: account-level batched fetch (list + insights per level),
+  // not one call per campaign/ad set — that fan-out is what tripped Meta's
+  // per-account rate limit.
+  try {
+    errors.push(...(await refreshAdSetsAndAds(acct, clientId, campaignIds, accessToken, service)));
+  } catch (e) {
+    errors.push(`ad_sets: ${(e as Error).message}`);
   }
 
   return { ok: true, refreshed: rows.length, errors: errors.length ? errors : undefined, at: now };
