@@ -65,15 +65,30 @@ Deno.serve(async (req) => {
     if (!accessToken) {
       return json({ ok: false, error: 'No Meta access token configured (Settings → Connections)' }, 400);
     }
+    // The target account/page are determined by the generation's own
+    // client + location — never trusted from the request body. A caller-
+    // supplied ad_account_id/page_id previously took precedence and was used
+    // verbatim, letting a workspace member create objects in ANY account the
+    // workspace token can reach (e.g. another client's account on the same
+    // Business Manager). Resolve from config, and reject a mismatched override
+    // rather than honouring it.
     const resolved = await resolveTargets(service, gen.client_id, gen.location_id);
-    const adAccountId = sanitizeAct(body.ad_account_id) ?? resolved.adAccountId;
-    const pageId = body.page_id?.trim() || resolved.pageId;
+    const adAccountId = resolved.adAccountId;
+    const pageId = resolved.pageId;
     if (!adAccountId) return json({ ok: false, error: 'No ad account configured for this client' }, 400);
     if (!pageId) {
       return json(
         { ok: false, error: 'No Facebook Page ID configured (set one on the client\'s Ad Accounts tab)' },
         400,
       );
+    }
+    const overrideAcct = sanitizeAct(body.ad_account_id);
+    if (overrideAcct && overrideAcct !== adAccountId) {
+      return json({ ok: false, error: 'ad_account_id does not match the account configured for this client' }, 403);
+    }
+    const overridePage = body.page_id?.trim();
+    if (overridePage && overridePage !== pageId) {
+      return json({ ok: false, error: 'page_id does not match the page configured for this client' }, 403);
     }
 
     const budget = Math.max(100, Math.min(body.daily_budget_cents ?? 1000, 1_000_000));
