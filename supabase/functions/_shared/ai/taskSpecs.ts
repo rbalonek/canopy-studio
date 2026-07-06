@@ -108,6 +108,9 @@ async function scrapedContentSection(
     .select('url, title, content, word_count')
     .eq('client_id', clientId)
     .is('competitor_id', null)
+    // 'all'-excluded pages are withheld from the AI ('scrape'-excluded ones
+    // still contribute their last recorded content).
+    .neq('excluded', 'all')
     .order('word_count', { ascending: false })
     .limit(3);
   if (!data?.length) return '';
@@ -347,6 +350,8 @@ const websiteAnalysis: SpecBuilder = async (service, job) => {
       .select('url, title, content')
       .eq('client_id', clientId)
       .is('competitor_id', null)
+      // Withhold 'all'-excluded pages from the brand analysis.
+      .neq('excluded', 'all')
       .order('word_count', { ascending: false })
       .limit(12),
     service

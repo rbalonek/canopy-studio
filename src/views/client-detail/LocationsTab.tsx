@@ -48,6 +48,26 @@ export function LocationsTab({ clientId, parentName }: Props) {
   >({});
   // null = closed; 'new' = adding; <id> = editing that location
   const [formState, setFormState] = useState<'new' | string | null>(null);
+  // The parent client's analyzed/entered logo, shown on each location card in
+  // place of the initials. /dev (mock, no workspace) keeps the initials.
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLogoUrl(null);
+    if (!supabase || !workspace) return;
+    supabase
+      .from('brand_profiles')
+      .select('logo_url')
+      .eq('client_id', clientId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled) setLogoUrl((data?.logo_url as string | null) ?? null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId, workspace]);
 
   async function refresh() {
     if (!supabase) {
@@ -144,6 +164,7 @@ export function LocationsTab({ clientId, parentName }: Props) {
             key={l.id}
             location={l}
             parentName={parentName}
+            logoUrl={logoUrl}
             liveAggs={l.adAccountId ? aggsByAccount[l.adAccountId] : undefined}
             onOpen={() => openLocation(l)}
             onAdStudio={() => {
@@ -194,6 +215,7 @@ export function LocationsTab({ clientId, parentName }: Props) {
 function LocationCard({
   location: l,
   parentName,
+  logoUrl,
   liveAggs,
   onOpen,
   onAdStudio,
@@ -202,12 +224,15 @@ function LocationCard({
 }: {
   location: Location;
   parentName: string;
+  logoUrl?: string | null;
   liveAggs?: { mtdSpend: number; activeCampaigns: number };
   onOpen: () => void;
   onAdStudio: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  // Fall back to initials if there's no brand logo or the image fails to load.
+  const [logoBroken, setLogoBroken] = useState(false);
   // Prefer live aggregates from the campaigns table when we have them;
   // fall back to whatever's on the locations row.
   const mtdLabel = liveAggs
@@ -221,9 +246,18 @@ function LocationCard({
     <div className="card card-pad stack gap-10">
       <div className="row between">
         <div className="row gap-8">
-          <div className="logo-mark" style={{ width: 28, height: 28, fontSize: 12 }}>
-            {initialsFromLocationName(l.name)}
-          </div>
+          {logoUrl && !logoBroken ? (
+            <img
+              src={logoUrl}
+              alt={`${parentName} logo`}
+              onError={() => setLogoBroken(true)}
+              style={{ height: 28, maxWidth: 104, objectFit: 'contain', borderRadius: 6 }}
+            />
+          ) : (
+            <div className="logo-mark" style={{ width: 28, height: 28, fontSize: 12 }}>
+              {initialsFromLocationName(l.name)}
+            </div>
+          )}
           <div className="stack">
             <span style={{ fontWeight: 500, fontSize: 13 }}>{l.name}</span>
             <span className="meta">{l.address}</span>

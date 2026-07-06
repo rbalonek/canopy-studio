@@ -161,6 +161,50 @@ Everything AI runs through one serverless pipeline:
   `cron.job_run_details` and the AI tabs surface "not configured"
   errors.
 
+## Website scraper
+
+[`scrape-client`](supabase/functions/scrape-client/index.ts) discovers + fetches
+a client's own site (and, tagged with a `competitor_id`, competitor sites) into
+`scraped_pages` + `scraped_domains`. Ported from
+`Swimm-Copywriting-API/server/routes/assets.js`. The stored page text is
+**persisted and reused** — the AI jobs (`website_analysis`, `copy_generation`,
+`creative_directions`, `competitor_analysis`) read it back from Postgres; Meta is
+never re-fetched for content. Two run modes on the same function:
+
+- **Discovery (default).** Body `{ client_id, url }`. robots.txt/sitemap → same-
+  domain link crawl → `rankUrls` (homepage/about/services first) → cap at
+  `max_pages` (default 8, max 20) → fetch/parse with cheerio → upsert on
+  `(client_id, url, competitor_id)`. Non-destructive: a failed re-scrape never
+  wipes prior content. Also mines homepage design signals (palette/fonts/logo)
+  onto the domain row.
+- **Add-mode (incremental).** Body `{ client_id, url, urls: string[] }`. When
+  `urls` is present, discovery/ranking are **skipped** — exactly those same-
+  domain URLs are (re)scraped, existing pages left untouched, so a member can add
+  a few individual pages without a full re-crawl. Design signals are **not**
+  re-mined (adding a subpage shouldn't clobber the homepage palette/logo).
+  Own-site only; ignored for competitor scrapes.
+
+**Per-page controls** (own-site pages, [`ScrapedPagesTab`](src/views/client-detail/ScrapedPagesTab.tsx)).
+`scraped_pages` carries two member-editable columns, written via
+membership-checked `SECURITY DEFINER` RPCs (same pattern as
+`set_campaign_strategy` — the table is otherwise service-role-write-only):
+
+- `excluded` (`set_scraped_page_exclusion(page_id, mode)`): `'none'` (active),
+  `'scrape'` (skip re-scraping but **keep** the last recorded content for the
+  AI), `'all'` (skip re-scraping **and** withhold content from the AI). The
+  discovery crawl filters out `'scrape'`/`'all'` URLs; the AI reads in
+  `taskSpecs.ts` add `.neq('excluded', 'all')`.
+- `content_edited` + `set_scraped_page_content(page_id, content)`: the Words
+  count opens a text editor; saving recomputes `word_count`, flags the row, and
+  future re-scrapes preserve the hand-edited text (the discovery crawl also skips
+  `content_edited` rows). Explicit add-mode re-scraping of a URL **re-activates**
+  it (clears `excluded` + `content_edited`).
+
+Domain-row `pages_indexed` reflects the domain's true total for own-site scrapes
+(so adds accumulate) rather than just the last run's count; `pages_discovered`
+never shrinks. Deploy touches: `scrape-client` (add-mode + exclusion-aware
+crawl) and `run-job` (the `excluded='all'` filter).
+
 ## Meta refresh & metrics
 
 [`meta-refresh-client`](supabase/functions/meta-refresh-client/index.ts) pulls

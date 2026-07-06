@@ -28,6 +28,26 @@ export function LocationDetail() {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshMsg, setRefreshMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [stats, setStats] = useState<{ mtdSpend: number; activeCampaigns: number } | null>(null);
+  // Parent client's analyzed/entered logo, shown in place of the initials.
+  // /dev (mock, no workspace) keeps the initials.
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLogoUrl(null);
+    if (!supabase || !workspace || !clientId) return;
+    supabase
+      .from('brand_profiles')
+      .select('logo_url')
+      .eq('client_id', clientId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled) setLogoUrl((data?.logo_url as string | null) ?? null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId, workspace]);
 
   async function refresh() {
     if (!supabase || !locId) {
@@ -166,12 +186,21 @@ export function LocationDetail() {
 
       <div className="row between" style={{ marginBottom: 20 }}>
         <div className="row gap-12">
-          <div
-            className="logo-mark"
-            style={{ width: 44, height: 44, fontSize: 18, borderRadius: 10 }}
-          >
-            {initials.toUpperCase()}
-          </div>
+          {logoUrl ? (
+            <img
+              src={logoUrl}
+              alt={`${parentName || 'Client'} logo`}
+              style={{ height: 44, maxWidth: 200, objectFit: 'contain', borderRadius: 10 }}
+              onError={() => setLogoUrl(null)}
+            />
+          ) : (
+            <div
+              className="logo-mark"
+              style={{ width: 44, height: 44, fontSize: 18, borderRadius: 10 }}
+            >
+              {initials.toUpperCase()}
+            </div>
+          )}
           <div className="stack gap-4">
             <h1 className="h0">{location.name}</h1>
             <span className="meta">{location.address}</span>

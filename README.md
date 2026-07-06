@@ -109,6 +109,28 @@ See [`.env.example`](.env.example). Notable:
                                    overwritten by Claude Design itself.
 ```
 
+## Website scraper
+
+The `scrape-client` Edge Function crawls a client's site (and competitor sites)
+and stores the extracted page text in the `scraped_pages` table. That content is
+kept and reused — it grounds the AI brand profile, ad copy, and competitor
+analysis; the site isn't re-fetched every time. Managed from a client's **Scraped
+Pages** tab:
+
+- **Re-scrape** — full re-crawl from the saved website URL (discovers the
+  sitemap, ranks pages, fetches the top ~8). Non-destructive: a failed run never
+  wipes existing pages.
+- **Add pages** — paste one or more URLs/paths to scrape just those, leaving
+  existing pages untouched (no re-crawl).
+- **Exclude** — per-page dropdown: *Active*, *Skip re-scrape* (keep the last
+  content for the AI), or *Skip re-scrape + content* (also hide it from the AI).
+- **Edit words** — click a page's word count to open its extracted text; edits
+  are saved and preserved across future re-scrapes.
+
+A client's analyzed logo (detected during scraping, stored on `brand_profiles`)
+is shown in place of the initials avatar across the client grid, tables, headers,
+and its location cards — falling back to initials when there's no logo.
+
 ## Meta publishing roadmap
 
 Four publishing features confirmed viable against the Meta Graph API. To be

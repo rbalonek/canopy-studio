@@ -35,6 +35,12 @@ interface Req {
   url: string;
   /** Cap on pages scraped. Default 8. */
   max_pages?: number;
+  /** Explicit pages to add/refresh. When present, discovery + ranking are
+   * skipped and exactly these same-domain URLs are (re)scraped — existing
+   * pages are left untouched, so a member can add a few individual pages
+   * without re-crawling. Re-scraping a URL this way re-activates it (clears
+   * any prior exclusion / manual-edit flag). Own-site scrapes only. */
+  urls?: string[];
   /** When set, this is a competitor scrape: pages/domain rows are tagged
    * with the competitor and replaced wholesale on each run. */
   competitor_id?: string;
@@ -88,12 +94,17 @@ Deno.serve(async (req) => {
     }
 
     const maxPages = Math.max(1, Math.min(body.max_pages ?? 8, 20));
+    // Explicit add-pages list (own-site only). Ignored for competitor scrapes.
+    const addUrls = !body.competitor_id && Array.isArray(body.urls)
+      ? body.urls.map((u) => String(u).trim()).filter(Boolean)
+      : [];
     const result = await scrape(
       body.client_id,
       body.url,
       maxPages,
       service,
       body.competitor_id ?? null,
+      addUrls,
     );
     return json(result, 200);
   } catch (e) {
@@ -107,6 +118,7 @@ async function scrape(
   maxPages: number,
   service: ReturnType<typeof createClient>,
   competitorId: string | null = null,
+  addUrls: string[] = [],
 ): Promise<{
   ok: boolean;
   pages_scraped: number;
@@ -131,33 +143,95 @@ async function scrape(
   }
   const domain = base.hostname;
 
+  // Own-site page controls (exclusions + manual edits) so a re-crawl can
+  // leave excluded/hand-edited pages alone. Competitor scrapes ignore these.
+  const controls = new Map<string, { excluded: string; contentEdited: boolean }>();
+  let existingDomainDiscovered = 0;
+  let existingSitemapStatus: 'Discovered' | 'Partial' | 'Failed' | null = null;
+  if (!competitorId) {
+    const [{ data: ctrlRows }, { data: domRow }] = await Promise.all([
+      service
+        .from('scraped_pages')
+        .select('url, excluded, content_edited')
+        .eq('client_id', clientId)
+        .is('competitor_id', null),
+      service
+        .from('scraped_domains')
+        .select('pages_discovered, sitemap_status')
+        .eq('client_id', clientId)
+        .is('competitor_id', null)
+        .eq('domain', domain)
+        .maybeSingle(),
+    ]);
+    for (const r of (ctrlRows ?? []) as any[]) {
+      controls.set(r.url as string, {
+        excluded: (r.excluded as string) ?? 'none',
+        contentEdited: !!r.content_edited,
+      });
+    }
+    existingDomainDiscovered = (domRow?.pages_discovered as number) ?? 0;
+    existingSitemapStatus = (domRow?.sitemap_status as typeof existingSitemapStatus) ?? null;
+  }
+
+  // Add-mode: explicit same-domain URLs, no discovery/ranking. Own-site only.
+  const explicitUrls = competitorId
+    ? []
+    : Array.from(
+        new Set(
+          addUrls
+            .map((u) => {
+              try {
+                return new URL(u.startsWith('http') ? u : `https://${u}`).toString();
+              } catch {
+                return '';
+              }
+            })
+            .filter((u) => u && sameDomain(u, base)),
+        ),
+      );
+  const isAddMode = explicitUrls.length > 0;
+
   // --- 1. Discover URLs ---
   const discovered = new Set<string>();
-  discovered.add(base.toString());
-
   let sitemapStatus: 'Discovered' | 'Partial' | 'Failed' = 'Failed';
-  try {
-    const sitemapUrls = await discoverFromSitemap(base);
-    sitemapUrls.forEach((u) => discovered.add(u));
-    sitemapStatus = sitemapUrls.length > 0 ? 'Discovered' : 'Failed';
-  } catch (e) {
-    errors.push(`sitemap: ${(e as Error).message}`);
-  }
+  let toScrape: string[];
 
-  // Fall back to crawling homepage links if sitemap was sparse
-  if (discovered.size < 3) {
+  if (isAddMode) {
+    // Skip discovery; the requested pages ARE the work list. Keep the domain's
+    // prior sitemap status rather than downgrading it to Failed.
+    explicitUrls.forEach((u) => discovered.add(u));
+    sitemapStatus = existingSitemapStatus ?? 'Partial';
+    toScrape = explicitUrls;
+  } else {
+    discovered.add(base.toString());
     try {
-      const homeLinks = await crawlSameDomain(base);
-      homeLinks.forEach((u) => discovered.add(u));
-      if (sitemapStatus === 'Failed' && homeLinks.length > 0) sitemapStatus = 'Partial';
+      const sitemapUrls = await discoverFromSitemap(base);
+      sitemapUrls.forEach((u) => discovered.add(u));
+      sitemapStatus = sitemapUrls.length > 0 ? 'Discovered' : 'Failed';
     } catch (e) {
-      errors.push(`homepage crawl: ${(e as Error).message}`);
+      errors.push(`sitemap: ${(e as Error).message}`);
     }
-  }
 
-  // Rank + cap
-  const ranked = rankUrls(Array.from(discovered), base);
-  const toScrape = ranked.slice(0, maxPages);
+    // Fall back to crawling homepage links if sitemap was sparse
+    if (discovered.size < 3) {
+      try {
+        const homeLinks = await crawlSameDomain(base);
+        homeLinks.forEach((u) => discovered.add(u));
+        if (sitemapStatus === 'Failed' && homeLinks.length > 0) sitemapStatus = 'Partial';
+      } catch (e) {
+        errors.push(`homepage crawl: ${(e as Error).message}`);
+      }
+    }
+
+    // Rank + cap, then drop pages the member has excluded from scraping or
+    // hand-edited — those are preserved as-is (their content still lives in
+    // scraped_pages; 'all'-excluded ones are withheld from the AI downstream).
+    const ranked = rankUrls(Array.from(discovered), base);
+    toScrape = ranked.slice(0, maxPages).filter((u) => {
+      const ctrl = controls.get(u);
+      return !(ctrl && (ctrl.excluded !== 'none' || ctrl.contentEdited));
+    });
+  }
 
   // --- 2. Scrape each ---
   // Both client and competitor pages upsert on (client_id, url, competitor_id)
@@ -169,7 +243,7 @@ async function scrape(
     try {
       const page = await fetchAndParse(u);
       if (!page) continue;
-      const row = {
+      const row: Record<string, unknown> = {
         client_id: clientId,
         competitor_id: competitorId,
         url: u,
@@ -179,6 +253,13 @@ async function scrape(
         status: 'analyzed',
         scraped_at: new Date().toISOString(),
       };
+      // Explicitly re-scraping a page (add-mode) re-activates it: clear any
+      // prior exclusion + manual-edit flag so its fresh content is used. In
+      // discovery mode these columns are omitted, so upsert preserves them.
+      if (isAddMode) {
+        row.excluded = 'none';
+        row.content_edited = false;
+      }
       const { error: writeErr } = await service
         .from('scraped_pages')
         .upsert(row, { onConflict: 'client_id,url,competitor_id' });
@@ -208,28 +289,52 @@ async function scrape(
 
   // --- 3. Design signals (palette / fonts / logo) from the homepage ---
   // Heuristic by nature — staged on the domain row for the
-  // website_analysis job to fold into brand_profiles as "detected".
+  // website_analysis job to fold into brand_profiles as "detected". Skipped in
+  // add-mode: adding a subpage shouldn't re-mine (or clobber) the homepage's
+  // brand look, so the domain row keeps its existing palette/fonts/logo.
   let design: DesignSignals = { palette: [], fonts: [], logoUrl: null };
-  try {
-    design = await extractDesignSignals(base);
-  } catch (e) {
-    errors.push(`design signals: ${(e as Error).message}`);
+  if (!isAddMode) {
+    try {
+      design = await extractDesignSignals(base);
+    } catch (e) {
+      errors.push(`design signals: ${(e as Error).message}`);
+    }
+  }
+
+  // For own-site scrapes, pages_indexed reflects the domain's true total (adds
+  // accumulate), not just this run's count; pages_discovered never shrinks.
+  let indexedTotal = scrapedCount;
+  let discoveredTotal = discovered.size;
+  if (!competitorId) {
+    const { data: allRows } = await service
+      .from('scraped_pages')
+      .select('url')
+      .eq('client_id', clientId)
+      .is('competitor_id', null);
+    indexedTotal = ((allRows ?? []) as { url: string }[]).filter(
+      (r) => sameDomain(r.url, base),
+    ).length;
+    discoveredTotal = Math.max(discovered.size, existingDomainDiscovered, indexedTotal);
   }
 
   // --- 4. Roll up domain stats ---
-  const domainRow = {
+  const domainRow: Record<string, unknown> = {
     client_id: clientId,
     competitor_id: competitorId,
     domain,
-    health: scrapedCount > 0 ? 'Healthy' : 'Error',
+    health: (competitorId ? scrapedCount : indexedTotal) > 0 ? 'Healthy' : 'Error',
     sitemap_status: sitemapStatus,
-    pages_discovered: discovered.size,
-    pages_indexed: scrapedCount,
-    raw_palette: design.palette.length ? design.palette : null,
-    raw_fonts: design.fonts.length ? design.fonts : null,
-    logo_url: design.logoUrl,
+    pages_discovered: competitorId ? discovered.size : discoveredTotal,
+    pages_indexed: competitorId ? scrapedCount : indexedTotal,
     last_crawled_at: new Date().toISOString(),
   };
+  // Only write design signals when we actually mined them, so an add-mode run
+  // (or a run where extraction failed) preserves the prior palette/fonts/logo.
+  if (!isAddMode) {
+    domainRow.raw_palette = design.palette.length ? design.palette : null;
+    domainRow.raw_fonts = design.fonts.length ? design.fonts : null;
+    domainRow.logo_url = design.logoUrl;
+  }
   if (competitorId) {
     if (scrapedCount > 0) {
       // Fresh content — replace the domain summary in place.
