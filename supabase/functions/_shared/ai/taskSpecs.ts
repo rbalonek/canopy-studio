@@ -812,7 +812,8 @@ const sendReport: SpecBuilder = async (service, job) => {
   const cadence = rs.cadence as 'daily' | 'weekly' | 'monthly';
 
   // Period: full days only — "yesterday" is the newest complete day.
-  const yesterday = new Date(Date.now() - 86_400_000);
+  const now = new Date(Date.now());
+  const yesterday = new Date(now.getTime() - 86_400_000);
   let periodStart: Date;
   let periodEnd = yesterday;
   if (cadence === 'daily') {
@@ -820,7 +821,11 @@ const sendReport: SpecBuilder = async (service, job) => {
   } else if (cadence === 'weekly') {
     periodStart = new Date(yesterday.getTime() - 6 * 86_400_000);
   } else {
-    const firstOfThisMonth = new Date(Date.UTC(yesterday.getUTCFullYear(), yesterday.getUTCMonth(), 1));
+    // The whole previous calendar month (the just-completed one). Anchor on
+    // *now*, not yesterday: the monthly send fires on the 1st, so yesterday is
+    // the last day of the prior month and anchoring on it would land the
+    // report a further month back (an Aug-1 send would cover June, not July).
+    const firstOfThisMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
     periodEnd = new Date(firstOfThisMonth.getTime() - 86_400_000);
     periodStart = new Date(Date.UTC(periodEnd.getUTCFullYear(), periodEnd.getUTCMonth(), 1));
   }
@@ -930,7 +935,8 @@ Return valid JSON:
 
       const channel = rs.channel as 'email' | 'slack' | 'both';
       const recipients = (rs.recipients as string[] | null) ?? [];
-      let sendError: string | undefined;
+      const errors: string[] = [];
+      let delivered = 0;
 
       if ((channel === 'email' || channel === 'both') && recipients.length) {
         const r = await sendEmail(service, {
@@ -940,7 +946,8 @@ Return valid JSON:
           subject,
           html,
         });
-        if (!r.ok) sendError = r.error;
+        if (r.ok) delivered++;
+        else errors.push(`email: ${r.error}`);
       }
       if (channel === 'slack' || channel === 'both') {
         const highlights = (narrative?.highlights ?? []).map((h: string) => `• ${h}`).join('\n');
@@ -949,8 +956,19 @@ Return valid JSON:
           kind: 'report',
           text: `*${subject}*\n${narrative?.headline ?? ''}\n${narrative?.summary ?? ''}\n${highlights}`,
         });
-        if (!r.ok) sendError = sendError ?? r.error;
+        if (r.ok) delivered++;
+        else errors.push(`slack: ${r.error}`);
       }
+
+      // A partial failure (e.g. email delivered but the Slack webhook 500s)
+      // must NOT mark the whole report failed: leaving last_sent_at unset
+      // would make the next cron cycle re-send and double-deliver the channel
+      // that already worked. Count it sent if anything went out (or nothing
+      // needed to — 'email' cadence with no recipients); the partial error is
+      // still recorded on the row for visibility. Only an all-channels failure
+      // is a true failure that should retry.
+      const sent = errors.length === 0 || delivered > 0;
+      const errorText = errors.length ? errors.join('; ') : null;
 
       await service.from('sent_reports').insert({
         report_settings_id: rs.id,
@@ -961,16 +979,16 @@ Return valid JSON:
         period_end: endStr,
         subject,
         body_html: html,
-        status: sendError ? 'failed' : 'sent',
-        error: sendError ?? null,
+        status: sent ? 'sent' : 'failed',
+        error: errorText,
       });
-      if (!sendError) {
+      if (sent) {
         await service
           .from('report_settings')
           .update({ last_sent_at: new Date().toISOString() })
           .eq('id', rs.id);
       }
-      return { ...narrative, sent: !sendError, error: sendError ?? null, subject };
+      return { ...narrative, sent, error: errorText, subject };
     },
   };
 };

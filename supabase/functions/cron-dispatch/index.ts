@@ -159,12 +159,25 @@ async function reportsDue(): Promise<void> {
 
   const { data } = await service
     .from('report_settings')
-    .select('id, workspace_id, client_id, cadence')
+    .select('id, workspace_id, client_id, cadence, last_sent_at')
     .eq('enabled', true)
     .in('cadence', due);
 
-  console.log(`[cron-dispatch] reports_due (${due.join(', ')}): ${data?.length ?? 0} report(s)`);
-  await runWithConcurrency((data ?? []) as any[], CONCURRENCY, async (rs) => {
+  // Idempotency: pg_net delivers the daily http_post at-least-once (retries,
+  // schedule overlap, manual re-invoke), and this function has no dedup of its
+  // own. Any cadence that is due *today* would already carry a last_sent_at of
+  // today once sent, so skipping rows sent on or after the start of today (UTC)
+  // makes a repeated dispatch a no-op without blocking the next period's send.
+  const startOfTodayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const pending = ((data ?? []) as any[]).filter((rs) => {
+    if (!rs.last_sent_at) return true;
+    return new Date(rs.last_sent_at as string).getTime() < startOfTodayUtc;
+  });
+
+  console.log(
+    `[cron-dispatch] reports_due (${due.join(', ')}): ${pending.length} of ${data?.length ?? 0} report(s) not yet sent today`,
+  );
+  await runWithConcurrency(pending, CONCURRENCY, async (rs) => {
     try {
       await enqueueSystemJob(service, {
         type: 'send_report',
