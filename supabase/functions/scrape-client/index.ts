@@ -504,34 +504,77 @@ async function extractDesignSignals(base: URL): Promise<DesignSignals> {
     }
   }
 
-  // -- Logo: common selectors, header-first (donor assets.js approach) --
-  const logoSelectors = [
-    'img[class*="logo" i]', 'img[id*="logo" i]', 'img[alt*="logo" i]',
-    '.logo img', '#logo img', 'header a[href="/"] img', 'a[href="/"] img',
-    'header img', 'nav img',
-  ];
+  // -- Logo: try in descending order of reliability — real logo markup,
+  //    then structured data, header imagery, the social-card image, and
+  //    finally icons. Resolves relative URLs against the page. --
+  // deno-lint-ignore no-explicit-any
+  const firstSrcset = (ss: string): string | null => ss.split(',')[0]?.trim().split(/\s+/)[0] || null;
+  // deno-lint-ignore no-explicit-any
+  const imgSrc = (el: any): string | null =>
+    el.attr('src') || el.attr('data-src') || (el.attr('srcset') ? firstSrcset(el.attr('srcset')) : null);
+  // Walk a JSON-LD node (Organization/WebSite/@graph) for a `logo` field.
+  // deno-lint-ignore no-explicit-any
+  const digLogo = (node: any): string | null => {
+    if (!node) return null;
+    if (Array.isArray(node)) {
+      for (const n of node) {
+        const r = digLogo(n);
+        if (r) return r;
+      }
+      return null;
+    }
+    if (typeof node === 'object') {
+      const g = node['@graph'] ? digLogo(node['@graph']) : null;
+      if (g) return g;
+      const logo = node.logo;
+      if (typeof logo === 'string') return logo;
+      if (logo && typeof logo === 'object' && typeof logo.url === 'string') return logo.url;
+    }
+    return null;
+  };
+
   let logoUrl: string | null = null;
-  for (const sel of logoSelectors) {
-    const src = $(sel).first().attr('src') ?? $(sel).first().attr('data-src');
-    if (src) {
-      try {
-        logoUrl = new URL(src, base).toString();
-        break;
-      } catch {
-        // keep looking
-      }
+  const resolve = (raw: string | null | undefined) => {
+    if (logoUrl || !raw) return;
+    try {
+      logoUrl = new URL(raw, base).toString();
+    } catch {
+      // ignore unparseable URL; keep looking
     }
+  };
+
+  // 1. An <img> whose class/id/alt actually says "logo".
+  for (const sel of ['img[class*="logo" i]', 'img[id*="logo" i]', 'img[alt*="logo" i]', '.logo img', '#logo img']) {
+    if (logoUrl) break;
+    resolve(imgSrc($(sel).first()));
   }
+  // 2. schema.org structured data (Organization/WebSite logo).
   if (!logoUrl) {
-    const icon = $('link[rel*="icon"]').first().attr('href');
-    if (icon) {
+    $('script[type="application/ld+json"]').each((_i, el) => {
+      if (logoUrl) return;
       try {
-        logoUrl = new URL(icon, base).toString();
+        resolve(digLogo(JSON.parse($(el).text() || '')));
       } catch {
-        // fine — no logo
+        // malformed JSON-LD — skip
       }
-    }
+    });
   }
+  if (!logoUrl) resolve($('meta[itemprop="logo"]').attr('content') || $('meta[property="og:logo"]').attr('content'));
+  // 3. Header / home-link imagery (structural guess).
+  for (const sel of ['header a[href="/"] img', 'a[href="/"] img', 'header img', 'nav img']) {
+    if (logoUrl) break;
+    resolve(imgSrc($(sel).first()));
+  }
+  // 4. Social-card image — a brand image, though not always a strict logo.
+  if (!logoUrl) resolve($('meta[property="og:image"]').attr('content') || $('meta[name="twitter:image"]').attr('content'));
+  // 5. Clean square app icon, then favicon, as last resorts.
+  if (!logoUrl) {
+    resolve(
+      $('link[rel="apple-touch-icon"]').first().attr('href') ||
+        $('link[rel="apple-touch-icon-precomposed"]').first().attr('href'),
+    );
+  }
+  if (!logoUrl) resolve($('link[rel*="icon"]').first().attr('href'));
 
   return { palette, fonts: fonts.slice(0, 5), logoUrl };
 }
