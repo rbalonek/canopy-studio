@@ -68,6 +68,21 @@ create policy "competitors delete for members" on competitors
 alter table scraped_pages add column if not exists competitor_id uuid references competitors(id) on delete cascade;
 alter table scraped_domains add column if not exists competitor_id uuid references competitors(id) on delete cascade;
 
+-- Fold competitor_id into the uniqueness so competitor pages are keyed per
+-- competitor, not per client. The old unique(client_id, url) meant two
+-- competitors of the same client that shared a URL — or a competitor page
+-- whose URL matched one of the client's own pages — collided, and the second
+-- write was silently dropped. NULLS NOT DISTINCT (Postgres 15+) keeps the
+-- client-owned rows (competitor_id IS NULL) de-duplicated as before, so the
+-- client-side upsert on (client_id, url, competitor_id) still coalesces them.
+alter table scraped_pages drop constraint if exists scraped_pages_client_id_url_key;
+alter table scraped_pages add constraint scraped_pages_client_url_competitor_key
+  unique nulls not distinct (client_id, url, competitor_id);
+
+alter table scraped_domains drop constraint if exists scraped_domains_client_id_domain_key;
+alter table scraped_domains add constraint scraped_domains_client_domain_competitor_key
+  unique nulls not distinct (client_id, domain, competitor_id);
+
 -- gap_angles: "what the competitor does that you don't (or vice versa)"
 -- — regenerated per competitor on each analysis run.
 create table if not exists gap_angles (

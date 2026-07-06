@@ -160,12 +160,10 @@ async function scrape(
   const toScrape = ranked.slice(0, maxPages);
 
   // --- 2. Scrape each ---
-  // Competitor runs replace their previous pages wholesale (the
-  // client_id+url unique key can't distinguish competitors).
-  if (competitorId) {
-    await service.from('scraped_pages').delete().eq('competitor_id', competitorId);
-  }
-
+  // Both client and competitor pages upsert on (client_id, url, competitor_id)
+  // — non-destructive, so a failed re-scrape never wipes prior content. (The
+  // constraint now carries competitor_id, so a URL shared by two competitors,
+  // or by a competitor and the client's own site, no longer collides.)
   let scrapedCount = 0;
   for (const u of toScrape) {
     try {
@@ -181,9 +179,9 @@ async function scrape(
         status: 'analyzed',
         scraped_at: new Date().toISOString(),
       };
-      const { error: writeErr } = competitorId
-        ? await service.from('scraped_pages').insert(row)
-        : await service.from('scraped_pages').upsert(row, { onConflict: 'client_id,url' });
+      const { error: writeErr } = await service
+        .from('scraped_pages')
+        .upsert(row, { onConflict: 'client_id,url,competitor_id' });
       if (writeErr) {
         errors.push(`write ${u}: ${writeErr.message}`);
         continue;
@@ -192,6 +190,20 @@ async function scrape(
     } catch (e) {
       errors.push(`${u}: ${(e as Error).message}`);
     }
+  }
+
+  // Prune a competitor's stale pages (URLs gone since the last scrape) — but
+  // only when this run produced fresh content, so a fully failed scrape
+  // (competitor site down/blocked/rate-limited) preserves what we already had
+  // instead of leaving the competitor with zero pages. Fresh rows carry a
+  // scraped_at at or after startedAt; anything older is stale.
+  if (competitorId && scrapedCount > 0) {
+    const { error: pruneErr } = await service
+      .from('scraped_pages')
+      .delete()
+      .eq('competitor_id', competitorId)
+      .lt('scraped_at', startedAt);
+    if (pruneErr) errors.push(`prune stale pages: ${pruneErr.message}`);
   }
 
   // --- 3. Design signals (palette / fonts / logo) from the homepage ---
@@ -219,14 +231,38 @@ async function scrape(
     last_crawled_at: new Date().toISOString(),
   };
   if (competitorId) {
-    await service.from('scraped_domains').delete().eq('competitor_id', competitorId);
-    await service.from('scraped_domains').insert(domainRow);
+    if (scrapedCount > 0) {
+      // Fresh content — replace the domain summary in place.
+      await service
+        .from('scraped_domains')
+        .upsert(domainRow, { onConflict: 'client_id,domain,competitor_id' });
+    } else {
+      // Failed scrape: record the health/attempt without destroying the
+      // palette/fonts/logo captured on a previous successful run. Only insert
+      // a fresh row if there was none (first-ever scrape had nothing to lose).
+      const { data: updated } = await service
+        .from('scraped_domains')
+        .update({
+          health: 'Error',
+          sitemap_status: sitemapStatus,
+          pages_discovered: discovered.size,
+          last_crawled_at: new Date().toISOString(),
+        })
+        .eq('competitor_id', competitorId)
+        .eq('domain', domain)
+        .select('id');
+      if (!updated || updated.length === 0) {
+        await service.from('scraped_domains').insert(domainRow);
+      }
+    }
     await service
       .from('competitors')
       .update({ last_scraped_at: new Date().toISOString() })
       .eq('id', competitorId);
   } else {
-    await service.from('scraped_domains').upsert(domainRow, { onConflict: 'client_id,domain' });
+    await service
+      .from('scraped_domains')
+      .upsert(domainRow, { onConflict: 'client_id,domain,competitor_id' });
   }
 
   return {

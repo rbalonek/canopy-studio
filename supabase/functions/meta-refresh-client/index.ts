@@ -357,10 +357,18 @@ async function refreshFromMeta(
       // History: one immutable-ish row per campaign per day. "yesterday"
       // insights are final by the time any refresh runs, so re-running a
       // day simply overwrites with the same numbers.
+      //
+      // Label the row with the date Meta actually returned (date_start), not
+      // our UTC "yesterday": date_preset=yesterday is evaluated in the ad
+      // account's timezone, so for accounts west of UTC the two differ near
+      // the 06:00-UTC run boundary. Using the UTC label there would write the
+      // row under the wrong (campaign_id, date) key and could overwrite a
+      // legitimate prior day. Fall back to UTC-yesterday only if absent.
+      const dailyDate = (daily?.date_start as string | undefined) ?? yesterday;
       metricRows.push({
         campaign_id: c.id,
         client_id: clientId,
-        date: yesterday,
+        date: dailyDate,
         spend: dailySpend,
         impressions: num(daily?.impressions),
         clicks: num(daily?.clicks),
