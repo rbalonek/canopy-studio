@@ -29,9 +29,46 @@ type Props =
   | { clientId: string; adAccountId?: never }
   | { clientId?: never; adAccountId: string };
 
+// Strategies the refresh derives (parseStrategy) — the same set is offered
+// when editing so a manual choice stays consistent with the auto-derived ones.
+const STRATEGY_OPTIONS = [
+  'Lead Generation',
+  'Purchase',
+  'Sales',
+  'Add to Cart (Warm-up)',
+  'View Content (Warm-up)',
+  'Video Views (Warm-up)',
+  'Traffic (Warm-up)',
+  'Traffic',
+  'Awareness',
+  'Unknown',
+];
+
+type StatusFilter = 'active' | 'paused' | 'archived' | 'all';
+const STATUS_FILTERS: { id: StatusFilter; label: string }[] = [
+  { id: 'active', label: 'Active' },
+  { id: 'paused', label: 'Paused' },
+  { id: 'archived', label: 'Archived' },
+  { id: 'all', label: 'All' },
+];
+function matchesFilter(status: string, f: StatusFilter): boolean {
+  switch (f) {
+    case 'active':
+      return status === 'ACTIVE';
+    case 'paused':
+      return status === 'PAUSED';
+    case 'archived':
+      return status === 'ARCHIVED' || status === 'DELETED';
+    case 'all':
+      return true;
+  }
+}
+
 export function CampaignsTable(props: Props) {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
+  const [editingId, setEditingId] = useState<string | null>(null);
   const navigate = useNavigate();
   const workspace = useWorkspace();
 
@@ -62,6 +99,25 @@ export function CampaignsTable(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [(props as any).clientId ?? (props as any).adAccountId]);
 
+  // Persist a manual strategy override (server-side RPC marks it custom so a
+  // future refresh won't overwrite it). Optimistic, with revert on error.
+  async function saveStrategy(id: string, strategy: string) {
+    setEditingId(null);
+    if (!supabase) return;
+    const current = rows?.find((r) => r.id === id)?.strategy ?? null;
+    if (strategy === current) return;
+    const prev = rows;
+    setRows((rs) => rs?.map((r) => (r.id === id ? { ...r, strategy } : r)) ?? rs);
+    const { error: e } = await supabase.rpc('set_campaign_strategy', {
+      p_campaign_id: id,
+      p_strategy: strategy,
+    });
+    if (e) {
+      setError(`Couldn't update strategy: ${e.message}`);
+      setRows(prev);
+    }
+  }
+
   if (rows === null) {
     return <div className="meta">Loading campaigns…</div>;
   }
@@ -86,6 +142,7 @@ export function CampaignsTable(props: Props) {
     );
   }
 
+  const visible = rows.filter((r) => matchesFilter(r.status, statusFilter));
   const lastRefresh = rows.reduce<string | null>((latest, r) => {
     if (!r.last_refreshed_at) return latest;
     if (!latest) return r.last_refreshed_at;
@@ -96,12 +153,12 @@ export function CampaignsTable(props: Props) {
     <div className="card">
       <div
         className="card-pad row between"
-        style={{ borderBottom: '1px solid var(--border)' }}
+        style={{ borderBottom: '1px solid var(--border)', flexWrap: 'wrap', gap: 8 }}
       >
         <div className="stack gap-4">
           <span className="h2">Campaigns</span>
           <span className="meta">
-            {rows.length} {rows.length === 1 ? 'campaign' : 'campaigns'} · MTD
+            {visible.length} of {rows.length} {rows.length === 1 ? 'campaign' : 'campaigns'} · MTD
             {lastRefresh && (
               <>
                 {' · '}refreshed{' '}
@@ -114,6 +171,18 @@ export function CampaignsTable(props: Props) {
               </>
             )}
           </span>
+        </div>
+        <div className="seg">
+          {STATUS_FILTERS.map((f) => (
+            <button
+              key={f.id}
+              className={statusFilter === f.id ? 'on' : ''}
+              onClick={() => setStatusFilter(f.id)}
+              style={{ padding: '4px 12px', fontSize: 12 }}
+            >
+              {f.label}
+            </button>
+          ))}
         </div>
       </div>
       <div style={{ overflowX: 'auto' }}>
@@ -130,43 +199,85 @@ export function CampaignsTable(props: Props) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => {
+            {visible.length === 0 && (
+              <tr>
+                <td colSpan={7} className="meta" style={{ textAlign: 'center', padding: 24 }}>
+                  No {statusFilter === 'all' ? '' : `${statusFilter} `}campaigns.
+                </td>
+              </tr>
+            )}
+            {visible.map((r) => {
               const prefix = workspace ? `/app/${workspace.slug}` : '/dev';
               const openCampaign = () =>
                 navigate(`${prefix}/clients/${r.client_id}/campaigns/${r.id}`);
               return (
                 <tr key={r.id} onClick={openCampaign} style={{ cursor: 'pointer' }}>
                   <td>
-                  <div className="stack gap-2">
-                    <span style={{ fontWeight: 500 }}>{r.name}</span>
-                    {r.ad_account_id && (
-                      <span className="mono meta" style={{ fontSize: 10 }}>
-                        {r.ad_account_id}
+                    <div className="stack gap-2">
+                      <span style={{ fontWeight: 500 }}>{r.name}</span>
+                      {r.ad_account_id && (
+                        <span className="mono meta" style={{ fontSize: 10 }}>
+                          {r.ad_account_id}
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td>
+                    <Status s={mapStatus(r.status)} />
+                  </td>
+                  <td
+                    className="meta"
+                    style={{ fontSize: 12 }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {editingId === r.id ? (
+                      <select
+                        autoFocus
+                        value={r.strategy ?? 'Unknown'}
+                        onChange={(e) => saveStrategy(r.id, e.target.value)}
+                        onBlur={() => setEditingId(null)}
+                        style={{
+                          background: 'var(--bg-2)',
+                          color: 'var(--fg)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 6,
+                          padding: '4px 6px',
+                          font: 'inherit',
+                          fontSize: 12,
+                        }}
+                      >
+                        {STRATEGY_OPTIONS.map((s) => (
+                          <option key={s} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span
+                        onClick={() => setEditingId(r.id)}
+                        title="Click to change strategy"
+                        style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                      >
+                        {r.strategy ?? '—'}
+                        <span style={{ opacity: 0.4, fontSize: 10 }}>✎</span>
                       </span>
                     )}
-                  </div>
-                </td>
-                <td>
-                  <Status s={mapStatus(r.status)} />
-                </td>
-                <td className="meta" style={{ fontSize: 12 }}>
-                  {r.strategy ?? '—'}
-                </td>
-                <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                  ${fmt(r.mtd_spend)}
-                </td>
-                <td
-                  style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}
-                  title={r.mtd_result_type ?? undefined}
-                >
-                  {fmt(r.mtd_results, 0)}
-                </td>
-                <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                  {r.mtd_results > 0 ? `$${fmt(r.mtd_cost_per_result)}` : '—'}
-                </td>
-                <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                  ${fmt(r.daily_spend)}
-                </td>
+                  </td>
+                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                    ${fmt(r.mtd_spend)}
+                  </td>
+                  <td
+                    style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}
+                    title={r.mtd_result_type ?? undefined}
+                  >
+                    {fmt(r.mtd_results, 0)}
+                  </td>
+                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                    {r.mtd_results > 0 ? `$${fmt(r.mtd_cost_per_result)}` : '—'}
+                  </td>
+                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                    ${fmt(r.daily_spend)}
+                  </td>
                 </tr>
               );
             })}

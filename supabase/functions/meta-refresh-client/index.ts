@@ -561,6 +561,19 @@ async function refreshFromMeta(
   const rows: any[] = [];
   const metricRows: any[] = [];
 
+  // Preserve manually-set strategies: any campaign flagged strategy_custom
+  // keeps its stored strategy instead of the freshly parsed one.
+  const customStrategy = new Map<string, string>();
+  {
+    const { data: existing } = await service
+      .from('campaigns')
+      .select('id, strategy, strategy_custom')
+      .eq('ad_account_id', acct);
+    for (const r of (existing ?? []) as any[]) {
+      if (r.strategy_custom && r.strategy) customStrategy.set(r.id as string, r.strategy as string);
+    }
+  }
+
   const campaignIds = new Set<string>();
   for (const c of campaigns) {
     try {
@@ -583,7 +596,10 @@ async function refreshFromMeta(
         name: c.name,
         status: c.status,
         objective: c.objective,
-        strategy: strategy.name,
+        // Manual override wins; otherwise the parsed strategy. strategy_custom
+        // is intentionally NOT in this payload, so the upsert leaves the flag
+        // as-is (stays true for overridden rows, false/default otherwise).
+        strategy: customStrategy.get(c.id) ?? strategy.name,
 
         daily_spend: dailySpend,
         mtd_spend: mtdSpend,
