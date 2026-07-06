@@ -173,7 +173,11 @@ async function scrape(
     existingSitemapStatus = (domRow?.sitemap_status as typeof existingSitemapStatus) ?? null;
   }
 
-  // Add-mode: explicit same-domain URLs, no discovery/ranking. Own-site only.
+  // Add-mode: explicit same-site URLs, no discovery/ranking. Own-site only.
+  // Same-site is www-insensitive, and we normalize each URL's host + protocol
+  // to the client's canonical domain (`base`) — discovery-mode pages all use
+  // base.hostname, so this keeps an added page grouped + counted with the rest
+  // of the site instead of stranding it under a separate www/non-www host.
   const explicitUrls = competitorId
     ? []
     : Array.from(
@@ -181,12 +185,16 @@ async function scrape(
           addUrls
             .map((u) => {
               try {
-                return new URL(u.startsWith('http') ? u : `https://${u}`).toString();
+                const parsed = new URL(u.startsWith('http') ? u : `https://${u}`);
+                if (!sameSite(parsed.toString(), base)) return '';
+                parsed.protocol = base.protocol;
+                parsed.hostname = base.hostname;
+                return parsed.toString();
               } catch {
                 return '';
               }
             })
-            .filter((u) => u && sameDomain(u, base)),
+            .filter(Boolean),
         ),
       );
   const isAddMode = explicitUrls.length > 0;
@@ -506,6 +514,17 @@ function rankUrls(urls: string[], _base: URL): string[] {
 function sameDomain(u: string, base: URL): boolean {
   try {
     return new URL(u).hostname === base.hostname;
+  } catch {
+    return false;
+  }
+}
+
+/** Like sameDomain but treats www.example.com and example.com as one site.
+ * Used for the add-pages list so a leading-www mismatch doesn't drop URLs. */
+function sameSite(u: string, base: URL): boolean {
+  const strip = (h: string) => h.replace(/^www\./i, '');
+  try {
+    return strip(new URL(u).hostname) === strip(base.hostname);
   } catch {
     return false;
   }

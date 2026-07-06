@@ -180,9 +180,12 @@ never re-fetched for content. Two run modes on the same function:
 - **Add-mode (incremental).** Body `{ client_id, url, urls: string[] }`. When
   `urls` is present, discovery/ranking are **skipped** — exactly those same-
   domain URLs are (re)scraped, existing pages left untouched, so a member can add
-  a few individual pages without a full re-crawl. Design signals are **not**
-  re-mined (adding a subpage shouldn't clobber the homepage palette/logo).
-  Own-site only; ignored for competitor scrapes.
+  a few individual pages without a full re-crawl. Matching is www-insensitive
+  (`sameSite`) and each URL's host/protocol is normalized to the client's
+  canonical domain before storing, so an added `www.` URL groups + counts with
+  the rest of the site instead of stranding under a separate host. Design signals
+  are **not** re-mined (adding a subpage shouldn't clobber the homepage
+  palette/logo). Own-site only; ignored for competitor scrapes.
 
 **Per-page controls** (own-site pages, [`ScrapedPagesTab`](src/views/client-detail/ScrapedPagesTab.tsx)).
 `scraped_pages` carries two member-editable columns, written via
