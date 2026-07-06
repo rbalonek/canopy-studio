@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Ring } from './Ring';
 
 type Props = {
@@ -7,10 +8,12 @@ type Props = {
   campaigns: number;
   posts: number;
   complete: number;
+  logoUrl?: string | null;
   onClick?: () => void;
 };
 
-export function EntityCard({ name, industry, mtd, campaigns, posts, complete, onClick }: Props) {
+export function EntityCard({ name, industry, mtd, campaigns, posts, complete, logoUrl, onClick }: Props) {
+  const [broken, setBroken] = useState(false);
   const initials = name
     .split(' ')
     .map((w) => w[0])
@@ -24,9 +27,18 @@ export function EntityCard({ name, industry, mtd, campaigns, posts, complete, on
     >
       <div className="row between">
         <div className="row gap-8">
-          <div className="logo-mark" style={{ width: 28, height: 28, fontSize: 13 }}>
-            {initials}
-          </div>
+          {logoUrl && !broken ? (
+            <img
+              src={logoUrl}
+              alt={`${name} logo`}
+              onError={() => setBroken(true)}
+              style={{ height: 28, maxWidth: 104, objectFit: 'contain', borderRadius: 6 }}
+            />
+          ) : (
+            <div className="logo-mark" style={{ width: 28, height: 28, fontSize: 13 }}>
+              {initials}
+            </div>
+          )}
           <div className="stack">
             <div style={{ fontWeight: 500 }}>{name}</div>
             <div className="meta">{industry}</div>
