@@ -118,6 +118,11 @@ function LiveCompetitorsTab({ clientId, workspaceId }: { clientId: string; works
 
   async function scrapeAndAnalyze(row: CompetitorRow) {
     if (!supabase) return;
+    // Only one scrape+analysis in flight at a time — busyId/jobId are single
+    // values, so starting a second would overwrite the first job's polling
+    // and strand it (its row would show idle while still processing). The
+    // per-card buttons are also disabled while anyBusy, this is the guard.
+    if (busyId) return;
     setError(null);
     setBusyId(row.id);
     setBusyLabel('Scraping site…');
@@ -223,6 +228,7 @@ function LiveCompetitorsTab({ clientId, workspaceId }: { clientId: string; works
           row={row}
           angles={angles.filter((a) => a.competitor_id === row.id)}
           busy={busyId === row.id}
+          anyBusy={busyId !== null}
           busyLabel={busyId === row.id ? busyLabel : ''}
           progress={busyId === row.id ? job.job?.progress ?? null : null}
           onScrape={() => scrapeAndAnalyze(row)}
@@ -238,6 +244,7 @@ function CompetitorCard({
   row,
   angles,
   busy,
+  anyBusy,
   busyLabel,
   progress,
   onScrape,
@@ -247,6 +254,7 @@ function CompetitorCard({
   row: CompetitorRow;
   angles: GapAngleRow[];
   busy: boolean;
+  anyBusy: boolean;
   busyLabel: string;
   progress: number | null;
   onScrape: () => void;
@@ -287,7 +295,7 @@ function CompetitorCard({
           </span>
         </div>
         <div className="row gap-6">
-          <button className="btn ai sm" onClick={onScrape} disabled={busy}>
+          <button className="btn ai sm" onClick={onScrape} disabled={anyBusy}>
             <Icon name="sparkles" size={12} />
             {busy ? `${busyLabel}${progress !== null ? ` ${progress}%` : ''}` : 'Scrape & analyze'}
           </button>

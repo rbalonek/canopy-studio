@@ -237,6 +237,12 @@ function EditableList({
   const [addingManual, setAddingManual] = useState(false);
   const [expandOpen, setExpandOpen] = useState(false);
   const [regenIndex, setRegenIndex] = useState<number | null>(null);
+  // The value being regenerated, captured when the panel opens. The rewrite
+  // job takes seconds during which the list stays editable, so we write the
+  // result back by matching this value, not the (now-possibly-stale) index —
+  // otherwise deleting/reordering an earlier item lands the rewrite on the
+  // wrong one.
+  const [regenValue, setRegenValue] = useState<string | null>(null);
 
   function setItems(next: string[]) {
     onChange(spec.write(results, next));
@@ -319,16 +325,25 @@ function EditableList({
       {regenIndex !== null && (
         <RegenPanel
           spec={spec}
-          value={items[regenIndex]}
+          value={regenValue ?? ''}
           workspaceId={workspaceId}
           clientId={clientId}
           onValue={(v) => {
-            const next = [...items];
-            next[regenIndex] = v;
-            setItems(next);
+            // Locate the item by its value in the current list; if it was
+            // deleted mid-rewrite the result is simply dropped.
+            const idx = regenValue === null ? -1 : items.indexOf(regenValue);
+            if (idx >= 0) {
+              const next = [...items];
+              next[idx] = v;
+              setItems(next);
+            }
             setRegenIndex(null);
+            setRegenValue(null);
           }}
-          onClose={() => setRegenIndex(null)}
+          onClose={() => {
+            setRegenIndex(null);
+            setRegenValue(null);
+          }}
         />
       )}
 
@@ -432,7 +447,10 @@ function EditableList({
                   <button
                     className="btn ghost sm"
                     title="Regenerate with AI"
-                    onClick={() => setRegenIndex(i)}
+                    onClick={() => {
+                      setRegenIndex(i);
+                      setRegenValue(item);
+                    }}
                     style={{ padding: '2px 6px' }}
                   >
                     <Icon name="refresh" size={11} />

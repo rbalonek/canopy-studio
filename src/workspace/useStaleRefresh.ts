@@ -26,7 +26,10 @@ export function useStaleRefresh(workspaceId: string | undefined): void {
         .from('campaigns')
         .select('client_id, last_refreshed_at, clients!inner(workspace_id)')
         .eq('clients.workspace_id', workspaceId)
-        .lt('last_refreshed_at', cutoff);
+        // Never-refreshed campaigns have last_refreshed_at = NULL. `.lt` alone
+        // drops them (NULL < cutoff is UNKNOWN), which would skip exactly the
+        // maximally-stale rows this check exists for — so match NULL too.
+        .or(`last_refreshed_at.lt.${cutoff},last_refreshed_at.is.null`);
       if (error || !data?.length) return;
 
       const staleClients = Array.from(

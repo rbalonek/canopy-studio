@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon';
 import { supabase } from '../../auth/supabaseClient';
 import { useQuery } from '../../data/context';
@@ -53,15 +53,24 @@ function LiveBrandTab({ clientId, workspaceId }: { clientId: string; workspaceId
   const [editedFields, setEditedFields] = useState<Record<string, boolean>>({});
   const [palette, setPalette] = useState<string[]>([]);
   const [fonts, setFonts] = useState<FontEntry[]>([]);
+  // Palette/fonts are edited independently of the text fields, so the dirty
+  // check must compare them against their own baselines — otherwise removing a
+  // swatch or font never enables Save and the removal can't be persisted.
+  const [baselinePalette, setBaselinePalette] = useState<string[]>([]);
+  const [baselineFonts, setBaselineFonts] = useState<FontEntry[]>([]);
   const [analyzedAt, setAnalyzedAt] = useState<string | null>(null);
   const [exists, setExists] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const analyze = useJobRunner();
+  // Guards against a slow load for a previous clientId (or an overlapping
+  // load() from the analyze-completed effect) applying over newer data.
+  const loadToken = useRef(0);
 
   async function load() {
     if (!supabase) return;
+    const token = ++loadToken.current;
     const { data } = await supabase
       .from('brand_profiles')
       .select(
@@ -69,6 +78,8 @@ function LiveBrandTab({ clientId, workspaceId }: { clientId: string; workspaceId
       )
       .eq('client_id', clientId)
       .maybeSingle();
+    // A newer load() started while this one was in flight — drop this result.
+    if (token !== loadToken.current) return;
     setLoading(false);
     if (!data) {
       setExists(false);
@@ -83,11 +94,15 @@ function LiveBrandTab({ clientId, workspaceId }: { clientId: string; workspaceId
       additional_notes: (data.additional_notes as string | null) ?? '',
       logo_url: (data.logo_url as string | null) ?? '',
     };
+    const nextPalette = (data.palette as string[] | null) ?? [];
+    const nextFonts = (data.fonts as FontEntry[] | null) ?? [];
     setFields(next);
     setBaseline(next);
     setEditedFields((data.edited_fields as Record<string, boolean> | null) ?? {});
-    setPalette((data.palette as string[] | null) ?? []);
-    setFonts((data.fonts as FontEntry[] | null) ?? []);
+    setPalette(nextPalette);
+    setFonts(nextFonts);
+    setBaselinePalette(nextPalette);
+    setBaselineFonts(nextFonts);
     setAnalyzedAt((data.analyzed_at as string | null) ?? null);
     setExists(true);
   }
@@ -105,7 +120,9 @@ function LiveBrandTab({ clientId, workspaceId }: { clientId: string; workspaceId
   }, [analyze.completed]);
 
   const dirty =
-    JSON.stringify(fields) !== JSON.stringify(baseline);
+    JSON.stringify(fields) !== JSON.stringify(baseline) ||
+    JSON.stringify(palette) !== JSON.stringify(baselinePalette) ||
+    JSON.stringify(fonts) !== JSON.stringify(baselineFonts);
 
   async function save() {
     if (!supabase) return;
@@ -140,6 +157,8 @@ function LiveBrandTab({ clientId, workspaceId }: { clientId: string; workspaceId
     }
     setEditedFields(nextEdited);
     setBaseline(fields);
+    setBaselinePalette(palette);
+    setBaselineFonts(fonts);
     setExists(true);
   }
 
