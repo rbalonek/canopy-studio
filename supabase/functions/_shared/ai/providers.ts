@@ -102,7 +102,12 @@ async function callAnthropic(
     body: JSON.stringify({
       model,
       max_tokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
-      ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+      // NB: temperature/top_p/top_k are intentionally NOT sent. The current
+      // Anthropic models (Sonnet 5, Opus 4.7/4.8, Fable 5 — our default is
+      // claude-sonnet-5) removed the sampling params and return HTTP 400
+      // ("temperature is deprecated for this model") if any are present.
+      // Task specs may still set options.temperature for the OpenAI path,
+      // which continues to honor it. Steer Anthropic via prompting instead.
       ...(system ? { system } : {}),
       messages: chat.map((m) => ({ role: m.role, content: m.content })),
     }),
