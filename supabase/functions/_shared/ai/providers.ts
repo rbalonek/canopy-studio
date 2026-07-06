@@ -43,6 +43,28 @@ export const DEFAULT_MODELS: Record<Provider, string> = {
 
 const DEFAULT_MAX_TOKENS = 8000;
 
+// Hard ceiling on a single provider round-trip. Without it a hung provider
+// (connection accepted, no response) makes run-job's processStep never
+// return; the isolate is then killed at the platform wall-clock cap before
+// the catch that marks the job failed can run, stranding the job in
+// 'processing' forever. Abort well inside that cap so the failure is caught.
+const LLM_TIMEOUT_MS = 90_000;
+
+async function fetchLlm(url: string, init: RequestInit, ms = LLM_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (e) {
+    if ((e as Error).name === 'AbortError') {
+      throw new Error(`LLM request timed out after ${ms}ms`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(id);
+  }
+}
+
 export async function callLlm(
   provider: Provider,
   model: string | null | undefined,
@@ -70,7 +92,7 @@ async function callAnthropic(
     .join('\n\n');
   const chat = messages.filter((m) => m.role !== 'system');
 
-  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+  const resp = await fetchLlm('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -119,7 +141,7 @@ async function callOpenAi(
   const apiKey = Deno.env.get('OPENAI_API_KEY');
   if (!apiKey) throw new Error('OPENAI_API_KEY is not configured');
 
-  const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+  const resp = await fetchLlm('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

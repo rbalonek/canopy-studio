@@ -14,9 +14,8 @@ import {
   authenticate,
   serviceClient,
 } from '../_shared/auth.ts';
-import { invokeInternal } from '../_shared/internal.ts';
 import { isKnownJobType, settingsTaskFor } from '../_shared/ai/taskSpecs.ts';
-import { loadTaskSettings, totalStepsFor } from '../_shared/ai/orchestrator.ts';
+import { handoffToRunJob, loadTaskSettings, totalStepsFor } from '../_shared/ai/orchestrator.ts';
 
 interface EnqueueRequest {
   type: string;
@@ -76,17 +75,10 @@ Deno.serve(async (req) => {
       return json({ ok: false, error: insertErr?.message ?? 'Failed to create job' }, 500);
     }
 
-    const handoff = await invokeInternal('run-job', { job_id: jobRow.id, step: 0 });
+    // handoffToRunJob marks the job failed if the hand-off throws or errors,
+    // so the row never sits 'pending' forever (nothing re-dispatches those).
+    const handoff = await handoffToRunJob(service, jobRow.id);
     if (!handoff.ok) {
-      const detail = await handoff.text().catch(() => '');
-      await service
-        .from('jobs')
-        .update({
-          status: 'failed',
-          error: `Failed to start job runner (${handoff.status}) ${detail.slice(0, 200)}`,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', jobRow.id);
       return json({ ok: false, error: 'Failed to start job runner' }, 500);
     }
 

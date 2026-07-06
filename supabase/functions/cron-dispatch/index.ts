@@ -20,7 +20,7 @@
 import { CORS, json } from '../_shared/cors.ts';
 import { serviceClient, type ServiceClient } from '../_shared/auth.ts';
 import { invokeInternal, isInternalCall } from '../_shared/internal.ts';
-import { loadTaskSettings, totalStepsFor } from '../_shared/ai/orchestrator.ts';
+import { handoffToRunJob, loadTaskSettings, totalStepsFor } from '../_shared/ai/orchestrator.ts';
 import { settingsTaskFor } from '../_shared/ai/taskSpecs.ts';
 
 declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
@@ -90,8 +90,10 @@ async function enqueueSystemJob(
   if (error || !jobRow) {
     throw new Error(`job insert failed: ${error?.message}`);
   }
-  const resp = await invokeInternal('run-job', { job_id: jobRow.id, step: 0 });
-  if (!resp.ok) throw new Error(`run-job handoff failed (${resp.status})`);
+  // Marks the job failed if the hand-off can't reach run-job, so a scheduled
+  // job never sits 'pending' forever.
+  const handoff = await handoffToRunJob(service, jobRow.id);
+  if (!handoff.ok) throw new Error(handoff.error ?? 'run-job handoff failed');
 }
 
 /** Weekly analysis for every client that has campaign data. */

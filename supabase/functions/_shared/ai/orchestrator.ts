@@ -11,6 +11,7 @@
 // Intermediate state (draft, review) rides along in jobs.state.
 
 import type { ServiceClient } from '../auth.ts';
+import { invokeInternal } from '../internal.ts';
 import {
   callLlm,
   extractJson,
@@ -94,6 +95,43 @@ export async function loadSkills(
 
 export function totalStepsFor(mode: AiMode): number {
   return mode === 'collaboration' ? 3 : 1;
+}
+
+/** Mark a job failed (best-effort — a fail-marking that itself fails is
+ * only logged, never thrown). */
+export async function failJob(
+  service: ServiceClient,
+  jobId: string,
+  error: string,
+): Promise<void> {
+  const { error: updErr } = await service
+    .from('jobs')
+    .update({ status: 'failed', error, updated_at: new Date().toISOString() })
+    .eq('id', jobId);
+  if (updErr) console.error(`[failJob] could not mark ${jobId} failed:`, updErr.message);
+}
+
+/** Hand a freshly-inserted 'pending' job to run-job. run-job 202s before
+ * doing work, so an ok response only confirms hand-off. Crucially, if the
+ * handoff *throws* (DNS/connection error) or returns non-ok, this marks the
+ * job failed — otherwise the row would sit 'pending' forever, since nothing
+ * re-dispatches pending jobs. Shared by enqueue-job and cron-dispatch. */
+export async function handoffToRunJob(
+  service: ServiceClient,
+  jobId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const resp = await invokeInternal('run-job', { job_id: jobId, step: 0 });
+    if (resp.ok) return { ok: true };
+    const detail = await resp.text().catch(() => '');
+    const error = `Failed to start job runner (${resp.status}) ${detail.slice(0, 200)}`.trim();
+    await failJob(service, jobId, error);
+    return { ok: false, error };
+  } catch (e) {
+    const error = `Failed to reach job runner: ${(e as Error).message}`;
+    await failJob(service, jobId, error);
+    return { ok: false, error };
+  }
 }
 
 /** What a task needs to tell the orchestrator to run it. */

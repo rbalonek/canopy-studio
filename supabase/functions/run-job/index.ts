@@ -25,7 +25,7 @@ import { CORS, json } from '../_shared/cors.ts';
 import { serviceClient } from '../_shared/auth.ts';
 import { invokeInternal, isInternalCall } from '../_shared/internal.ts';
 import { getSpecBuilder, settingsTaskFor, type JobRow } from '../_shared/ai/taskSpecs.ts';
-import { loadTaskSettings, runOrchestratedStep } from '../_shared/ai/orchestrator.ts';
+import { failJob, loadTaskSettings, runOrchestratedStep } from '../_shared/ai/orchestrator.ts';
 
 // The Edge Runtime global for background tasks; typed loosely because the
 // Deno types don't ship it.
@@ -87,7 +87,11 @@ async function processStep(jobId: string, step: number): Promise<void> {
     .maybeSingle();
 
   if (claim.error) {
+    // A DB error while claiming (not "already claimed") would otherwise leave
+    // the job stuck in its current status with no terminal transition. Mark
+    // it failed so the UI stops polling and the failure is visible.
     console.error(`[run-job] claim failed for ${jobId}: ${claim.error.message}`);
+    await failJob(service, jobId, `Job runner could not claim step ${step}: ${claim.error.message}`);
     return;
   }
   if (!claim.data) {
