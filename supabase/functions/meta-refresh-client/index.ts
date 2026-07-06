@@ -373,6 +373,31 @@ async function getAccountInsights(
   return map;
 }
 
+/** Compress one insights row into a compact per-period object — all the
+ * standard fields plus the raw { action_type: count } map. Stored on
+ * campaigns.metrics_by_period so the UI can switch periods and the analysis
+ * bots have every metric per period, not just the current month. */
+// deno-lint-ignore no-explicit-any
+function periodMetrics(row: Record<string, any> | null | undefined): Record<string, any> {
+  const actions: Record<string, number> = {};
+  // deno-lint-ignore no-explicit-any
+  for (const a of (row?.actions ?? []) as any[]) actions[a.action_type] = num(a.value);
+  return {
+    spend: num(row?.spend),
+    impressions: num(row?.impressions),
+    clicks: num(row?.clicks),
+    cpc: num(row?.cpc),
+    cpm: num(row?.cpm),
+    ctr: num(row?.ctr),
+    reach: num(row?.reach),
+    frequency: num(row?.frequency),
+    roas: num(row?.purchase_roas?.[0]?.value ?? row?.website_purchase_roas?.[0]?.value),
+    date_start: (row?.date_start as string | undefined) ?? null,
+    date_stop: (row?.date_stop as string | undefined) ?? null,
+    actions,
+  };
+}
+
 /** Ad sets + ads for the whole account in a handful of batched calls: one list
  * call per level (paginated) and two account-level insights calls per level —
  * NOT one /adsets call per campaign and one /ads call per ad set (that fan-out
@@ -547,10 +572,17 @@ async function refreshFromMeta(
     'spend,impressions,clicks,actions,cpc,cpm,ctr,reach,frequency,purchase_roas,website_purchase_roas';
   let campMtd: Map<string, Record<string, any>> = new Map();
   let campDaily: Map<string, Record<string, any>> = new Map();
+  let campLm: Map<string, Record<string, any>> = new Map();
+  let camp30: Map<string, Record<string, any>> = new Map();
   try {
-    [campMtd, campDaily] = await Promise.all([
+    // Multiple periods so the UI can switch and the analysis bots can compare
+    // across time (purchases vs reach, traffic vs CPC, …) — each is one
+    // account-level call, so this is +2 requests, not a per-campaign fan-out.
+    [campMtd, campDaily, campLm, camp30] = await Promise.all([
       getAccountInsights(acct, 'campaign', 'this_month', CAMPAIGN_INSIGHT_FIELDS, accessToken),
       getAccountInsights(acct, 'campaign', 'yesterday', CAMPAIGN_INSIGHT_FIELDS, accessToken),
+      getAccountInsights(acct, 'campaign', 'last_month', CAMPAIGN_INSIGHT_FIELDS, accessToken),
+      getAccountInsights(acct, 'campaign', 'last_30d', CAMPAIGN_INSIGHT_FIELDS, accessToken),
     ]);
   } catch (e) {
     return { ok: false, error: `Meta campaign insights failed: ${(e as Error).message}` };
@@ -622,6 +654,14 @@ async function refreshFromMeta(
         reach: num(mtd?.reach),
         frequency: num(mtd?.frequency),
         roas: num(mtd?.purchase_roas?.[0]?.value ?? mtd?.website_purchase_roas?.[0]?.value),
+
+        // Full per-period metrics (every field + the raw action map) for the
+        // UI period switcher and the AI analysis bots' cross-metric checks.
+        metrics_by_period: {
+          this_month: periodMetrics(mtd),
+          last_month: periodMetrics(campLm.get(c.id) ?? null),
+          last_30d: periodMetrics(camp30.get(c.id) ?? null),
+        },
 
         last_refreshed_at: now,
         updated_at: now,

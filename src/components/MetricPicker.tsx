@@ -1,22 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
-import { METRICS, type MetricGroup } from '../lib/metaMetrics';
+import { METRICS, type MetricDef, type MetricGroup } from '../lib/metaMetrics';
 
-const GROUP_ORDER: MetricGroup[] = ['Core', 'Conversions', 'Engagement', 'Efficiency'];
+const GROUP_ORDER: MetricGroup[] = ['Core', 'Conversions', 'Engagement', 'Efficiency', 'More actions'];
 
 /** Selection persisted to localStorage, seeded from `defaults` on first use.
- * Unknown/removed keys are dropped so a stale saved list can't break. */
+ * Dynamic (auto-discovered) keys are kept verbatim; the view drops any that
+ * aren't available for the current data at render time. */
 export function usePersistentSelection(
   storageKey: string,
   defaults: string[],
 ): [string[], (keys: string[]) => void] {
-  const valid = new Set(METRICS.map((m) => m.key));
   const [keys, setKeys] = useState<string[]>(() => {
     try {
       const raw = localStorage.getItem(storageKey);
       if (raw) {
         const parsed = JSON.parse(raw) as string[];
-        const filtered = parsed.filter((k) => valid.has(k));
-        if (filtered.length) return filtered;
+        if (Array.isArray(parsed) && parsed.length) return parsed.filter((k) => typeof k === 'string');
       }
     } catch {
       // ignore malformed storage
@@ -34,15 +33,17 @@ export function usePersistentSelection(
   return [keys, update];
 }
 
-/** Dropdown of grouped metric checkboxes. `selected` is an ordered list of
- * metric keys; toggling preserves catalog order and keeps at least one. */
+/** Dropdown of grouped metric checkboxes. `metrics` is the full available set
+ * (curated + auto-discovered); `selected` is an ordered list of keys. */
 export function MetricPicker({
   selected,
   onChange,
+  metrics = METRICS,
   label = 'Metrics',
 }: {
   selected: string[];
   onChange: (keys: string[]) => void;
+  metrics?: MetricDef[];
   label?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -57,16 +58,16 @@ export function MetricPicker({
     return () => document.removeEventListener('mousedown', onDoc);
   }, [open]);
 
+  const order = metrics.map((m) => m.key);
   const sel = new Set(selected);
   const toggle = (key: string) => {
     if (sel.has(key)) {
       if (selected.length <= 1) return; // keep at least one
       onChange(selected.filter((k) => k !== key));
     } else {
-      // keep catalog order in the resulting list
       const next = new Set(sel);
       next.add(key);
-      onChange(METRICS.filter((m) => next.has(m.key)).map((m) => m.key));
+      onChange(order.filter((k) => next.has(k)));
     }
   };
 
@@ -83,15 +84,15 @@ export function MetricPicker({
             right: 0,
             top: 'calc(100% + 6px)',
             zIndex: 30,
-            width: 260,
-            maxHeight: 360,
+            width: 280,
+            maxHeight: 400,
             overflowY: 'auto',
             padding: 8,
             boxShadow: '0 8px 30px rgba(0,0,0,0.35)',
           }}
         >
           {GROUP_ORDER.map((group) => {
-            const items = METRICS.filter((m) => m.group === group);
+            const items = metrics.filter((m) => m.group === group);
             if (!items.length) return null;
             return (
               <div key={group} style={{ marginBottom: 6 }}>
@@ -105,12 +106,7 @@ export function MetricPicker({
                   <label
                     key={m.key}
                     className="row gap-8"
-                    style={{
-                      padding: '5px 6px',
-                      borderRadius: 6,
-                      cursor: 'pointer',
-                      alignItems: 'center',
-                    }}
+                    style={{ padding: '5px 6px', borderRadius: 6, cursor: 'pointer', alignItems: 'center' }}
                   >
                     <input
                       type="checkbox"

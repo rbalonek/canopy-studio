@@ -1,14 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../auth/supabaseClient';
 import { Status } from '../../components/Status';
 import { MetricPicker, usePersistentSelection } from '../../components/MetricPicker';
 import {
   DEFAULT_CAMPAIGN_COLUMNS,
-  METRICS_BY_KEY,
+  PERIODS,
   formatMetric,
+  indexMetrics,
+  metricsFor,
   normalizeCampaign,
   type CampaignRow,
+  type Period,
 } from '../../lib/metaMetrics';
 import { useWorkspace } from '../../workspace/WorkspaceProvider';
 
@@ -72,16 +75,20 @@ function matchesFilter(status: string, f: StatusFilter): boolean {
 
 const SELECT_COLUMNS =
   'id, client_id, name, status, strategy, ad_account_id, last_refreshed_at, ' +
-  'mtd_spend, mtd_results, mtd_cost_per_result, impressions, clicks, cpc, cpm, ctr, reach, frequency, roas, all_mtd_actions';
+  'mtd_spend, impressions, clicks, cpc, cpm, ctr, reach, frequency, roas, all_mtd_actions, metrics_by_period';
 
 export function CampaignsTable(props: Props) {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
+  const [period, setPeriod] = useState<Period>('this_month');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [cols, setCols] = usePersistentSelection('canopy.campaignCols', DEFAULT_CAMPAIGN_COLUMNS);
   const navigate = useNavigate();
   const workspace = useWorkspace();
+
+  const metrics = useMemo(() => metricsFor(rows ?? [], period), [rows, period]);
+  const byKey = useMemo(() => indexMetrics(metrics), [metrics]);
 
   useEffect(() => {
     if (!supabase) {
@@ -154,7 +161,7 @@ export function CampaignsTable(props: Props) {
     if (!latest) return r.last_refreshed_at;
     return r.last_refreshed_at > latest ? r.last_refreshed_at : latest;
   }, null);
-  const metricCols = cols.map((k) => METRICS_BY_KEY[k]).filter(Boolean);
+  const metricCols = cols.map((k) => byKey[k]).filter(Boolean);
 
   return (
     <div className="card">
@@ -165,7 +172,8 @@ export function CampaignsTable(props: Props) {
         <div className="stack gap-4">
           <span className="h2">Campaigns</span>
           <span className="meta">
-            {visible.length} of {rows.length} {rows.length === 1 ? 'campaign' : 'campaigns'} · MTD
+            {visible.length} of {rows.length} {rows.length === 1 ? 'campaign' : 'campaigns'} ·{' '}
+            {PERIODS.find((p) => p.id === period)?.label}
             {lastRefresh && (
               <>
                 {' · '}refreshed{' '}
@@ -181,6 +189,18 @@ export function CampaignsTable(props: Props) {
         </div>
         <div className="row gap-8" style={{ flexWrap: 'wrap' }}>
           <div className="seg">
+            {PERIODS.map((p) => (
+              <button
+                key={p.id}
+                className={period === p.id ? 'on' : ''}
+                onClick={() => setPeriod(p.id)}
+                style={{ padding: '4px 12px', fontSize: 12 }}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <div className="seg">
             {STATUS_FILTERS.map((f) => (
               <button
                 key={f.id}
@@ -192,7 +212,7 @@ export function CampaignsTable(props: Props) {
               </button>
             ))}
           </div>
-          <MetricPicker selected={cols} onChange={setCols} label="Columns" />
+          <MetricPicker selected={cols} onChange={setCols} metrics={metrics} label="Columns" />
         </div>
       </div>
       <div style={{ overflowX: 'auto' }}>
@@ -221,7 +241,7 @@ export function CampaignsTable(props: Props) {
               const prefix = workspace ? `/app/${workspace.slug}` : '/dev';
               const openCampaign = () =>
                 navigate(`${prefix}/clients/${r.client_id}/campaigns/${r.id}`);
-              const norm = normalizeCampaign(r);
+              const norm = normalizeCampaign(r, period);
               return (
                 <tr key={r.id} onClick={openCampaign} style={{ cursor: 'pointer' }}>
                   <td>

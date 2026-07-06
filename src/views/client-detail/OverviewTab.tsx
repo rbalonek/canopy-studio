@@ -1,14 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AreaChart } from '../../components/AreaChart';
 import { KPI } from '../../components/KPI';
 import { MetricPicker, usePersistentSelection } from '../../components/MetricPicker';
 import { supabase } from '../../auth/supabaseClient';
 import {
   DEFAULT_OVERVIEW_CARDS,
-  METRICS_BY_KEY,
+  PERIODS,
   aggregate,
   formatMetric,
+  indexMetrics,
+  metricsFor,
   type CampaignRow,
+  type Period,
 } from '../../lib/metaMetrics';
 import { useQuery } from '../../data/context';
 import { useWorkspace } from '../../workspace/WorkspaceProvider';
@@ -28,12 +31,15 @@ export function OverviewTab({ clientId }: { clientId: string }) {
 type LiveRow = CampaignRow & { status?: string };
 
 const OVERVIEW_SELECT =
-  'status, mtd_spend, mtd_results, mtd_cost_per_result, impressions, clicks, cpc, cpm, ctr, reach, frequency, roas, all_mtd_actions';
+  'status, strategy, mtd_spend, impressions, clicks, cpc, cpm, ctr, reach, frequency, roas, all_mtd_actions, metrics_by_period';
 
 function LiveOverviewTab({ clientId }: { clientId: string }) {
   const [rows, setRows] = useState<LiveRow[] | null | undefined>(undefined);
   const [daily, setDaily] = useState<{ date: string; spend: number }[]>([]);
+  const [period, setPeriod] = useState<Period>('this_month');
   const [cards, setCards] = usePersistentSelection('canopy.overviewCards', DEFAULT_OVERVIEW_CARDS);
+  const metrics = useMemo(() => metricsFor(rows ?? [], period), [rows, period]);
+  const byKey = useMemo(() => indexMetrics(metrics), [metrics]);
 
   useEffect(() => {
     if (!supabase) {
@@ -82,18 +88,32 @@ function LiveOverviewTab({ clientId }: { clientId: string }) {
     );
   }
 
-  const agg = aggregate(rows);
+  const agg = aggregate(rows, period);
   const activeCount = rows.filter((r) => r.status === 'ACTIVE').length;
-  const cardDefs = cards.map((k) => METRICS_BY_KEY[k]).filter(Boolean);
+  const cardDefs = cards.map((k) => byKey[k]).filter(Boolean);
 
   return (
     <>
       <div className="row between" style={{ marginBottom: 8, alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <span className="meta">
-          {activeCount} active · {rows.length} total {rows.length === 1 ? 'campaign' : 'campaigns'} ·
-          month to date
+          {activeCount} active · {rows.length} total {rows.length === 1 ? 'campaign' : 'campaigns'} ·{' '}
+          {PERIODS.find((p) => p.id === period)?.label}
         </span>
-        <MetricPicker selected={cards} onChange={setCards} label="Cards" />
+        <div className="row gap-8">
+          <div className="seg">
+            {PERIODS.map((p) => (
+              <button
+                key={p.id}
+                className={period === p.id ? 'on' : ''}
+                onClick={() => setPeriod(p.id)}
+                style={{ padding: '4px 12px', fontSize: 12 }}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <MetricPicker selected={cards} onChange={setCards} metrics={metrics} label="Cards" />
+        </div>
       </div>
       <div className="grid grid-4 gap-16" style={{ gap: 16, marginBottom: 16 }}>
         {cardDefs.map((m) => (
