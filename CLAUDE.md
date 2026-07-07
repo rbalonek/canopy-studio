@@ -208,6 +208,29 @@ Domain-row `pages_indexed` reflects the domain's true total for own-site scrapes
 never shrinks. Deploy touches: `scrape-client` (add-mode + exclusion-aware
 crawl) and `run-job` (the `excluded='all'` filter).
 
+## Asset library
+
+Client uploads (logos / photos / videos / docs) live in a **public** Supabase
+Storage bucket `client-assets`, one path prefix per client
+(`<client_id>/<uuid>-<file>`), with an `assets` metadata row per file. The
+browser uploads directly via `supabase.storage` and inserts the row — no Edge
+Function. [`AssetsTab`](src/views/client-detail/AssetsTab.tsx) branches on
+`useWorkspace()`: live upload-backed grid vs. the `/dev` wireframe (mock
+`listAssetsForClient`). Migration: `20260706180000_assets.sql`.
+
+- **Public bucket on purpose:** objects get stable public URLs so a logo renders
+  app-wide and can be passed to Meta as `image_url` on publish. Storage RLS still
+  gates **writes/deletes** to workspace members of the client owning the path's
+  first segment (`(storage.foldername(name))[1]`); the `assets` table has the
+  usual member RLS (read/insert/update/delete). Inserts that fail roll back the
+  orphaned object so storage + table stay in sync.
+- **Set as client logo:** on an image asset, writes `brand_profiles.logo_url =
+  asset.url` and sets `edited_fields.logo_url = true` (member RLS allows the
+  upsert directly — no RPC), so `website_analysis`'s `finalize` skips overwriting
+  it. Also tags that row `kind = 'Logo'`. The "Logo" badge marks whichever asset
+  URL matches `brand_profiles.logo_url` — the same field the client/location
+  avatars already fall back to.
+
 ## Meta refresh & metrics
 
 [`meta-refresh-client`](supabase/functions/meta-refresh-client/index.ts) pulls

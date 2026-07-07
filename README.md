@@ -131,6 +131,15 @@ A client's analyzed logo (detected during scraping, stored on `brand_profiles`)
 is shown in place of the initials avatar across the client grid, tables, headers,
 and its location cards — falling back to initials when there's no logo.
 
+## Asset library
+
+A client's **Assets** tab is a real upload-backed library: drop in logos, photos,
+videos, or brand docs and they're stored in a public Supabase Storage bucket
+(`client-assets`) with a metadata row per file. Uploads, thumbnails, and delete
+all work from the browser. **Set as client logo** on any image makes it the
+client's brand logo (shown app-wide, and protected from being overwritten by a
+future website analysis). `/dev` keeps the wireframe on mock data.
+
 ## Meta publishing roadmap
 
 Four publishing features confirmed viable against the Meta Graph API. To be
