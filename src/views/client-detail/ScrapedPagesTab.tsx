@@ -103,6 +103,19 @@ export function ScrapedPagesTab({ clientId }: { clientId: string }) {
     [workspace, clientId],
   );
 
+  // Scan the freshly recorded nav links / discovered URLs for per-location
+  // pages (best-effort — new finds appear in the Locations tab). Discovery
+  // scrapes only: add-mode doesn't refresh the detection material.
+  const detectLocations = useCallback(() => {
+    if (!workspace) return;
+    enqueueJob({
+      type: 'location_detection',
+      workspaceId: workspace.id,
+      clientId,
+      input: {},
+    }).catch((e) => console.warn('Location detection enqueue failed:', e));
+  }, [workspace, clientId]);
+
   async function onScrape(url: string) {
     if (!supabase || !url) return;
     setScraping(true);
@@ -124,6 +137,7 @@ export function ScrapedPagesTab({ clientId }: { clientId: string }) {
       text: `Scraped ${data.pages_scraped} of ${data.pages_discovered} discovered pages. Updating the brand profile…`,
     });
     reanalyze(url);
+    detectLocations();
     refresh();
   }
 

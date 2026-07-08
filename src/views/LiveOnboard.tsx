@@ -141,6 +141,14 @@ export function LiveOnboard() {
             clientId: createdClientId,
             input: { url: clientWebsite.trim() },
           }).catch((e) => console.warn('Brand analysis enqueue failed:', e));
+          // And the multi-location scan — detected locations surface as
+          // one-click suggestions in the client's Locations tab.
+          enqueueJob({
+            type: 'location_detection',
+            workspaceId: ws.id,
+            clientId: createdClientId,
+            input: {},
+          }).catch((e) => console.warn('Location detection enqueue failed:', e));
         } else {
           setScrapeStatus(scrapeData?.error ?? 'Scrape returned no pages');
         }

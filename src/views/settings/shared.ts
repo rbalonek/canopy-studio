@@ -40,6 +40,11 @@ export const AI_TASKS: Array<{ id: string; label: string; hint: string }> = [
     hint: 'Turning scraped pages into a brand profile',
   },
   {
+    id: 'location_detection',
+    label: 'Location detection',
+    hint: 'Spotting per-location pages on a scraped site',
+  },
+  {
     id: 'competitor_analysis',
     label: 'Competitor analysis',
     hint: 'Comparisons and gap angles from competitor sites',

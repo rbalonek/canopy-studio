@@ -98,23 +98,40 @@ async function loadLocationContext(
 }
 
 /** Highest-signal scraped pages for grounding, kept small on purpose —
- * the landing page (explicit user input) matters more than bulk. */
+ * the landing page (explicit user input) matters more than bulk. For
+ * location-scoped jobs, that location's own tagged pages come first
+ * (its /asheville section beats the site-wide homepage), topped up with
+ * site-wide pages when the location has fewer than the budget. */
 async function scrapedContentSection(
   service: ServiceClient,
   clientId: string,
+  locationId?: string | null,
 ): Promise<string> {
-  const { data } = await service
-    .from('scraped_pages')
-    .select('url, title, content, word_count')
-    .eq('client_id', clientId)
-    .is('competitor_id', null)
-    // 'all'-excluded pages are withheld from the AI ('scrape'-excluded ones
-    // still contribute their last recorded content).
-    .neq('excluded', 'all')
-    .order('word_count', { ascending: false })
-    .limit(3);
-  if (!data?.length) return '';
-  const parts = data.map((p: any) => {
+  const LIMIT = 3;
+  const fetchPages = (scope: 'location' | 'sitewide', limit: number) => {
+    let q = service
+      .from('scraped_pages')
+      .select('url, title, content, word_count')
+      .eq('client_id', clientId)
+      .is('competitor_id', null)
+      // 'all'-excluded pages are withheld from the AI ('scrape'-excluded ones
+      // still contribute their last recorded content).
+      .neq('excluded', 'all');
+    q = scope === 'location' ? q.eq('location_id', locationId) : q.is('location_id', null);
+    return q.order('word_count', { ascending: false }).limit(limit);
+  };
+
+  const pages: any[] = [];
+  if (locationId) {
+    const { data: locPages } = await fetchPages('location', LIMIT);
+    pages.push(...(locPages ?? []));
+  }
+  if (pages.length < LIMIT) {
+    const { data: sitePages } = await fetchPages('sitewide', LIMIT - pages.length);
+    pages.push(...(sitePages ?? []));
+  }
+  if (!pages.length) return '';
+  const parts = pages.map((p: any) => {
     const content = ((p.content as string) ?? '').slice(0, 2500);
     return `PAGE ${p.url}${p.title ? ` — "${p.title}"` : ''}:\n${content}`;
   });
@@ -146,7 +163,7 @@ async function loadGenerationScope(
       : Promise.resolve(null),
     loadSkills(service, job.workspace_id, task),
     landingPageSection(input.landing_page_url as string | undefined),
-    scrapedContentSection(service, job.client_id),
+    scrapedContentSection(service, job.client_id, input.location_id as string | undefined),
   ]);
 
   // Location-scoped: client brand is the parent, location is the child.
@@ -1051,6 +1068,158 @@ function renderReportHtml(args: {
 </div>`;
 }
 
+/** location_detection — classify the scraper's recorded nav links +
+ * discovered URLs into per-location pages (bigairusa.com/asheville) vs
+ * generic pages (bigairusa.com/birthdays). URL shape alone can't tell
+ * those apart — that's why this is an LLM call, not a regex in the
+ * scraper. finalize() stages NEW findings in location_suggestions for
+ * one-click confirmation in the Locations tab; it never creates
+ * locations directly and never resurrects a dismissed suggestion. */
+const locationDetection: SpecBuilder = async (service, job) => {
+  if (!job.client_id) throw new Error('location_detection requires a client_id');
+  const clientId = job.client_id;
+
+  const [{ data: domainRow }, { data: clientRow }, { data: existingLocs }, skills] =
+    await Promise.all([
+      service
+        .from('scraped_domains')
+        .select('domain, nav_links, discovered_urls')
+        .eq('client_id', clientId)
+        .is('competitor_id', null)
+        .order('last_crawled_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      service.from('clients').select('name, website').eq('id', clientId).maybeSingle(),
+      service.from('locations').select('id, name, url').eq('client_id', clientId),
+      loadSkills(service, job.workspace_id, 'location_detection'),
+    ]);
+
+  const navLinks: Array<{ url: string; text: string }> = Array.isArray(domainRow?.nav_links)
+    ? (domainRow!.nav_links as any[])
+    : [];
+  const discoveredUrls: string[] = Array.isArray(domainRow?.discovered_urls)
+    ? (domainRow!.discovered_urls as string[])
+    : [];
+  if (!navLinks.length && !discoveredUrls.length) {
+    throw new Error(
+      'No link data recorded for this domain yet — run a full website scrape first.',
+    );
+  }
+
+  const clientName = (clientRow?.name as string) ?? 'this client';
+  const domain = (domainRow?.domain as string) ?? '';
+  const knownLocations = ((existingLocs ?? []) as any[])
+    .map((l) => `- ${l.name}${l.url ? ` (${l.url})` : ''}`)
+    .join('\n');
+
+  const navSection = navLinks
+    .slice(0, 150)
+    .map((l) => `"${l.text || '(no text)'}" → ${l.url}`)
+    .join('\n');
+  const urlSection = discoveredUrls.slice(0, 300).join('\n');
+
+  return {
+    system:
+      'You are a careful website-structure analyst for a marketing platform. You classify URLs strictly from the evidence provided — never invent URLs. Always respond with valid JSON.' +
+      skillsBlock(skills),
+    user: `## BUSINESS
+${clientName} — website domain: ${domain}
+
+## TASK
+Some businesses run multiple physical locations, each with its own section of the website — e.g. a "Select a Park" or "Choose your location" menu linking to /asheville, /riverside/home/, etc. Decide whether this site is multi-location, and if so, list each location's landing URL.
+
+## HOMEPAGE NAVIGATION LINKS (anchor text → URL)
+${navSection || '(none captured)'}
+
+## ALL DISCOVERED URLS (sitemap + crawl)
+${urlSection || '(none captured)'}
+
+${knownLocations ? `## LOCATIONS ALREADY ON FILE (do NOT repeat these)\n${knownLocations}\n` : ''}
+## RULES
+- Only use URLs that appear VERBATIM in the lists above. Never construct or guess a URL.
+- A location page is a section of the site for one physical place (city, neighborhood, venue). Generic pages (pricing, birthdays, attractions, careers, franchising, blog, about, contact, programs, safety) are NOT locations even when their URL shape looks identical.
+- Use the anchor text as evidence: links grouped under a location picker, or named after cities/regions, are strong signals.
+- Exclude "coming soon" locations (e.g. /coming-soon/...) — they are not operating yet.
+- Give each location a clean human name (e.g. "Asheville", "San Bernardino") derived from the anchor text or URL slug — title case, no slugs or hyphens.
+- Prefer the location's landing/home URL, not its subpages (/asheville, not /asheville/birthdays).
+- confidence: 90+ when a clear location-picker pattern backs it, lower when inferred from the URL alone.
+- If the site is single-location, return an empty list.
+
+Return valid JSON:
+{
+  "multi_location": true or false,
+  "locations": [
+    { "name": "Asheville", "url": "https://www.example.com/asheville", "confidence": 0-100 }
+  ]
+}`,
+    reviewInstructions:
+      'Check every URL appears verbatim in the provided link lists, no generic pages (pricing/birthdays/careers/etc.) were classified as locations, no coming-soon locations are included, names are clean title-case place names, and none duplicates a location already on file.',
+    json: true,
+    llmOptions: { temperature: 0.2 },
+    finalize: async (result: any) => {
+      const found: Array<{ name: string; url: string; confidence: number }> = (
+        Array.isArray(result?.locations) ? result.locations : []
+      )
+        .map((l: any) => ({
+          name: String(l?.name ?? '').trim(),
+          url: String(l?.url ?? '').trim(),
+          confidence: Math.max(0, Math.min(100, Number(l?.confidence) || 50)),
+        }))
+        .filter((l: { name: string; url: string }) => l.name && l.url);
+
+      // Canonical key: host without www + path without trailing slash, so
+      // https://www.x.com/asheville/ and https://x.com/asheville dedupe.
+      const urlKey = (u: string): string | null => {
+        try {
+          const p = new URL(u.startsWith('http') ? u : `https://${u}`);
+          return (
+            p.hostname.replace(/^www\./i, '') + p.pathname.replace(/\/+$/, '')
+          ).toLowerCase();
+        } catch {
+          return null;
+        }
+      };
+
+      const [{ data: locs }, { data: suggestions }] = await Promise.all([
+        service.from('locations').select('url').eq('client_id', clientId),
+        service.from('location_suggestions').select('url, status').eq('client_id', clientId),
+      ]);
+      const taken = new Set<string>();
+      for (const r of [...((locs ?? []) as any[]), ...((suggestions ?? []) as any[])]) {
+        const k = r.url ? urlKey(r.url as string) : null;
+        if (k) taken.add(k);
+      }
+
+      const fresh: typeof found = [];
+      const seen = new Set<string>();
+      for (const l of found) {
+        const k = urlKey(l.url);
+        if (!k || taken.has(k) || seen.has(k)) continue;
+        seen.add(k);
+        fresh.push(l);
+      }
+
+      if (fresh.length) {
+        const { error } = await service.from('location_suggestions').insert(
+          fresh.map((l) => ({
+            client_id: clientId,
+            name: l.name,
+            url: l.url,
+            confidence: l.confidence,
+          })),
+        );
+        if (error) throw new Error(`Failed to save location suggestions: ${error.message}`);
+      }
+
+      return {
+        multi_location: !!result?.multi_location,
+        detected: found.length,
+        new_suggestions: fresh.length,
+      };
+    },
+  };
+};
+
 /** test_prompt — Phase-0 plumbing check. Exercises the full pipeline
  * (settings lookup, skills injection, collaboration chaining, JSON
  * parsing, usage rows) with a trivial marketing prompt. */
@@ -1076,6 +1245,7 @@ const BUILDERS: Record<string, SpecBuilder> = {
   expand_content: expandContent,
   regenerate_single: regenerateSingle,
   website_analysis: websiteAnalysis,
+  location_detection: locationDetection,
   competitor_analysis: competitorAnalysis,
   account_analysis: accountAnalysis,
   send_report: sendReport,

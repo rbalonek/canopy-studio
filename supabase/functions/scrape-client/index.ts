@@ -44,6 +44,11 @@ interface Req {
   /** When set, this is a competitor scrape: pages/domain rows are tagged
    * with the competitor and replaced wholesale on each run. */
   competitor_id?: string;
+  /** Tag the scraped pages with a location of this client (add-mode only —
+   * a full discovery crawl is site-wide, not location-scoped). Used when a
+   * confirmed location's own pages (/asheville, /asheville/birthdays) are
+   * pulled in so location-scoped AI jobs can read them. */
+  location_id?: string;
 }
 
 Deno.serve(async (req) => {
@@ -98,6 +103,21 @@ Deno.serve(async (req) => {
     const addUrls = !body.competitor_id && Array.isArray(body.urls)
       ? body.urls.map((u) => String(u).trim()).filter(Boolean)
       : [];
+    // Location tagging: add-mode + own-site only, and the location must
+    // belong to this client.
+    let locationId: string | null = null;
+    if (body.location_id && !body.competitor_id && addUrls.length > 0) {
+      const { data: loc } = await service
+        .from('locations')
+        .select('id')
+        .eq('id', body.location_id)
+        .eq('client_id', body.client_id)
+        .maybeSingle();
+      if (!loc) {
+        return json({ ok: false, error: 'Location not found for this client' }, 404);
+      }
+      locationId = body.location_id;
+    }
     const result = await scrape(
       body.client_id,
       body.url,
@@ -105,6 +125,7 @@ Deno.serve(async (req) => {
       service,
       body.competitor_id ?? null,
       addUrls,
+      locationId,
     );
     return json(result, 200);
   } catch (e) {
@@ -119,6 +140,7 @@ async function scrape(
   service: ReturnType<typeof createClient>,
   competitorId: string | null = null,
   addUrls: string[] = [],
+  locationId: string | null = null,
 ): Promise<{
   ok: boolean;
   pages_scraped: number;
@@ -267,6 +289,10 @@ async function scrape(
       if (isAddMode) {
         row.excluded = 'none';
         row.content_edited = false;
+        // Location-tagged add-mode: claim the page for the location. Only
+        // written when a location was requested, so a plain add-pages run
+        // never strips an existing tag.
+        if (locationId) row.location_id = locationId;
       }
       const { error: writeErr } = await service
         .from('scraped_pages')
@@ -300,7 +326,10 @@ async function scrape(
   // website_analysis job to fold into brand_profiles as "detected". Skipped in
   // add-mode: adding a subpage shouldn't re-mine (or clobber) the homepage's
   // brand look, so the domain row keeps its existing palette/fonts/logo.
-  let design: DesignSignals = { palette: [], fonts: [], logoUrl: null };
+  // The same unstripped homepage fetch also yields nav_links (anchor text +
+  // URL, nav/header/footer included — where "Select a Park"-style location
+  // pickers live), the raw material for the location_detection job.
+  let design: DesignSignals = { palette: [], fonts: [], logoUrl: null, navLinks: [] };
   if (!isAddMode) {
     try {
       design = await extractDesignSignals(base);
@@ -342,6 +371,14 @@ async function scrape(
     domainRow.raw_palette = design.palette.length ? design.palette : null;
     domainRow.raw_fonts = design.fonts.length ? design.fonts : null;
     domainRow.logo_url = design.logoUrl;
+    // Detection material for own-site discovery runs: homepage nav links +
+    // the full discovery set (capped) so location_detection sees pages far
+    // beyond the few actually scraped.
+    if (!competitorId) {
+      domainRow.nav_links = design.navLinks.length ? design.navLinks : null;
+      const discoveredList = Array.from(discovered).slice(0, 300);
+      domainRow.discovered_urls = discoveredList.length ? discoveredList : null;
+    }
   }
   if (competitorId) {
     if (scrapedCount > 0) {
@@ -538,6 +575,9 @@ interface DesignSignals {
   palette: string[];
   fonts: Array<{ family: string; source: 'google-fonts' | 'css' }>;
   logoUrl: string | null;
+  /** Same-site anchors (href + visible text) from the unstripped homepage.
+   * Raw material for the location_detection job. */
+  navLinks: Array<{ url: string; text: string }>;
 }
 
 // Generic CSS font keywords that aren't brand fonts.
@@ -553,9 +593,33 @@ const GENERIC_FONTS = new Set([
  * stylesheets for colors, font families, and a logo URL. */
 async function extractDesignSignals(base: URL): Promise<DesignSignals> {
   const resp = await fetchWithTimeout(base.toString());
-  if (!resp.ok) return { palette: [], fonts: [], logoUrl: null };
+  if (!resp.ok) return { palette: [], fonts: [], logoUrl: null, navLinks: [] };
   const html = await resp.text();
   const $ = cheerio.load(html);
+
+  // -- Nav links: every same-site anchor with its visible text, deduped by
+  //    URL, capped. Location pickers ("Select a Park" → /anderson, /asheville)
+  //    live in exactly the nav/header markup fetchAndParse strips, so this is
+  //    the one place they're reliably visible. --
+  const navLinks: DesignSignals['navLinks'] = [];
+  const seenNav = new Set<string>();
+  $('a[href]').each((_: number, el: any) => {
+    if (navLinks.length >= 150) return;
+    const href = $(el).attr('href');
+    if (!href || href.startsWith('#')) return;
+    try {
+      const abs = new URL(href, base);
+      if (!sameSite(abs.toString(), base)) return;
+      abs.hash = '';
+      const url = abs.toString();
+      if (seenNav.has(url)) return;
+      seenNav.add(url);
+      const text = $(el).text().replace(/\s+/g, ' ').trim().slice(0, 80);
+      navLinks.push({ url, text });
+    } catch {
+      // skip invalid hrefs
+    }
+  });
 
   // -- CSS sources: inline <style> blocks + first 3 same-origin sheets --
   let css = '';
@@ -700,7 +764,7 @@ async function extractDesignSignals(base: URL): Promise<DesignSignals> {
   }
   if (!logoUrl) resolve($('link[rel*="icon"]').first().attr('href'));
 
-  return { palette, fonts: fonts.slice(0, 5), logoUrl };
+  return { palette, fonts: fonts.slice(0, 5), logoUrl, navLinks };
 }
 
 async function fetchWithTimeout(url: string, ms = FETCH_TIMEOUT_MS): Promise<Response> {

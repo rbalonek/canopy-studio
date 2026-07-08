@@ -12,6 +12,10 @@ export type Location = {
   id: string;
   name: string;
   address: string;
+  /** This location's own section of the client's website
+   * (e.g. https://www.bigairusa.com/asheville). Set by the multi-location
+   * detector or by hand; its pages are scraped + tagged to the location. */
+  url?: string | null;
   mtdSpend: string;
   activeCampaigns: number;
   postsPerWeek: number;

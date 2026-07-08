@@ -208,6 +208,33 @@ Domain-row `pages_indexed` reflects the domain's true total for own-site scrapes
 never shrinks. Deploy touches: `scrape-client` (add-mode + exclusion-aware
 crawl) and `run-job` (the `excluded='all'` filter).
 
+**Multi-location detection.** Discovery scrapes record raw material on the
+domain row — `nav_links` (same-site anchors + text from the *unstripped*
+homepage, where "Select a Park"-style pickers live) and `discovered_urls`
+(sitemap/crawl set, capped at 300). The UI chains a `location_detection` AI
+job after every own-site scrape (ScrapedPagesTab + onboarding), and the
+Locations tab has a manual "Detect locations" button (useJobRunner) that
+re-classifies the last scrape's link data on demand: the LLM
+separates location pages (`/asheville`) from look-alike generic pages
+(`/birthdays` — URL shape alone can't tell them apart, which is why it's an
+LLM call, not a scraper regex) and its finalize stages **new** finds in
+`location_suggestions` (unique `(client_id, url)`; dismissed rows are never
+resurrected — dedup is www-/trailing-slash-insensitive). The Locations tab
+shows pending suggestions as a confirm banner: adding creates the `locations`
+row (with `url`) and fire-and-forgets an add-mode scrape of the location URL
+plus up to 4 already-discovered subpages, tagged via the new
+`scraped_pages.location_id` (add-mode + own-site only; a plain add-pages run
+never strips an existing tag). The Add/Edit Location form has a URL field that
+triggers the same tagged scrape. Location-scoped AI jobs
+(`scrapedContentSection`) read that location's tagged pages first, topped up
+with site-wide (`location_id is null`) pages. Bot-walled sites (e.g.
+glominigolf.com behind Cloudflare) can't be scraped at all, so detection can't
+see them — locations there are added manually and their pages stay unscraped
+until bot-protection handling exists. Migration:
+`20260707120000_location_detection.sql` (also extends the `ai_settings` task
+check constraint). Deploy touches: `scrape-client`, `enqueue-job`, `run-job`,
+`cron-dispatch` (all import the shared `taskSpecs.ts`).
+
 ## Asset library
 
 Client uploads (logos / photos / videos / docs) live in a **public** Supabase

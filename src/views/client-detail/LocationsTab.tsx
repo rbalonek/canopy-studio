@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../auth/supabaseClient';
 import { Icon } from '../../components/Icon';
 import { Ring } from '../../components/Ring';
+import { useJobRunner } from '../../data/useJob';
 import type { Location } from '../../data/types';
 import { useWorkspace } from '../../workspace/WorkspaceProvider';
 
@@ -38,6 +39,67 @@ function normalizeAdAccountId(raw: string): string {
   return trimmed.startsWith('act_') ? trimmed : `act_${trimmed}`;
 }
 
+type Suggestion = {
+  id: string;
+  name: string;
+  url: string;
+  confidence: number;
+};
+
+/** Scrape a location's own pages (best-effort, fire-and-forget): the
+ * location URL itself plus up to 4 already-discovered subpages under it
+ * (e.g. /asheville → /asheville/birthdays), tagged with the location so
+ * location-scoped AI jobs read the right content. `discoveredUrls` is the
+ * domain row's recorded discovery set — pass it when you already have it
+ * (batch confirms), otherwise it's fetched here. */
+async function scrapeLocationPages(
+  clientId: string,
+  locationId: string,
+  locationUrl: string,
+  discoveredUrls?: string[],
+) {
+  if (!supabase) return;
+  if (!discoveredUrls) {
+    const { data: domainRow } = await supabase
+      .from('scraped_domains')
+      .select('discovered_urls')
+      .eq('client_id', clientId)
+      .is('competitor_id', null)
+      .order('last_crawled_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    discoveredUrls = Array.isArray(domainRow?.discovered_urls)
+      ? (domainRow!.discovered_urls as string[])
+      : [];
+  }
+  const urls = [locationUrl];
+  try {
+    const locPath = new URL(locationUrl).pathname.replace(/\/+$/, '');
+    if (locPath) {
+      const strip = (h: string) => h.replace(/^www\./i, '');
+      const locHost = strip(new URL(locationUrl).hostname);
+      for (const u of discoveredUrls) {
+        if (urls.length >= 5) break;
+        try {
+          const p = new URL(u);
+          if (strip(p.hostname) !== locHost) continue;
+          const path = p.pathname.replace(/\/+$/, '');
+          if (path !== locPath && path.startsWith(`${locPath}/`)) urls.push(u);
+        } catch {
+          // skip unparseable discovered URLs
+        }
+      }
+    }
+  } catch {
+    // location URL unparseable — scrape it verbatim and let the function decide
+  }
+  supabase.functions
+    .invoke('scrape-client', {
+      body: { client_id: clientId, url: locationUrl, urls, location_id: locationId },
+    })
+    .catch((e) => console.warn('Location page scrape failed:', e));
+}
+
 export function LocationsTab({ clientId, parentName }: Props) {
   const workspace = useWorkspace();
   const navigate = useNavigate();
@@ -48,6 +110,12 @@ export function LocationsTab({ clientId, parentName }: Props) {
   >({});
   // null = closed; 'new' = adding; <id> = editing that location
   const [formState, setFormState] = useState<'new' | string | null>(null);
+  // Pending multi-location detections awaiting confirmation.
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [selectedSuggestions, setSelectedSuggestions] = useState<Set<string>>(new Set());
+  const [confirming, setConfirming] = useState(false);
+  // Manual "Detect locations" run — re-classifies the last scrape's link data.
+  const detect = useJobRunner<{ multi_location: boolean; new_suggestions: number }>();
   // The parent client's analyzed/entered logo, shown on each location card in
   // place of the initials. /dev (mock, no workspace) keeps the initials.
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
@@ -77,7 +145,7 @@ export function LocationsTab({ clientId, parentName }: Props) {
     const { data, error } = await supabase
       .from('locations')
       .select(
-        'id, name, address, mtd_spend, active_campaigns, posts_per_week, complete, page_id, instagram_business_account_id, ad_account_id',
+        'id, name, address, url, mtd_spend, active_campaigns, posts_per_week, complete, page_id, instagram_business_account_id, ad_account_id',
       )
       .eq('client_id', clientId)
       .order('name');
@@ -90,6 +158,7 @@ export function LocationsTab({ clientId, parentName }: Props) {
         id: r.id as string,
         name: r.name as string,
         address: r.address as string,
+        url: (r.url as string | null) ?? null,
         mtdSpend: r.mtd_spend as string,
         activeCampaigns: r.active_campaigns as number,
         postsPerWeek: r.posts_per_week as number,
@@ -105,6 +174,80 @@ export function LocationsTab({ clientId, parentName }: Props) {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
+
+  async function refreshSuggestions() {
+    if (!supabase || !workspace) return;
+    const { data } = await supabase
+      .from('location_suggestions')
+      .select('id, name, url, confidence')
+      .eq('client_id', clientId)
+      .eq('status', 'pending')
+      .order('confidence', { ascending: false })
+      .order('name');
+    const rows = (data ?? []) as Suggestion[];
+    setSuggestions(rows);
+    setSelectedSuggestions(new Set(rows.map((s) => s.id)));
+  }
+
+  useEffect(() => {
+    refreshSuggestions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, workspace?.id]);
+
+  // A finished manual detection run may have staged new suggestions.
+  useEffect(() => {
+    if (detect.completed) refreshSuggestions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detect.completed]);
+
+  /** Confirm the checked suggestions: create a location per row (URL kept),
+   * mark the suggestion added, and kick off a tagged scrape of each
+   * location's pages in the background. */
+  async function addSelectedSuggestions() {
+    if (!supabase || selectedSuggestions.size === 0) return;
+    setConfirming(true);
+    // The domain's discovery set feeds subpage scraping (/asheville/birthdays).
+    const { data: domainRow } = await supabase
+      .from('scraped_domains')
+      .select('discovered_urls')
+      .eq('client_id', clientId)
+      .is('competitor_id', null)
+      .order('last_crawled_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const discoveredUrls = Array.isArray(domainRow?.discovered_urls)
+      ? (domainRow!.discovered_urls as string[])
+      : [];
+
+    for (const s of suggestions.filter((s) => selectedSuggestions.has(s.id))) {
+      const locationId = `${slugify(s.name)}-${randomSuffix()}`;
+      const { error } = await supabase.from('locations').insert({
+        id: locationId,
+        client_id: clientId,
+        name: s.name,
+        address: '',
+        url: s.url,
+      });
+      if (error) {
+        console.warn(`Failed to add location "${s.name}":`, error.message);
+        continue;
+      }
+      await supabase
+        .from('location_suggestions')
+        .update({ status: 'added' })
+        .eq('id', s.id);
+      scrapeLocationPages(clientId, locationId, s.url, discoveredUrls);
+    }
+    setConfirming(false);
+    refresh();
+    refreshSuggestions();
+  }
+
+  async function dismissSuggestion(s: Suggestion) {
+    if (!supabase) return;
+    setSuggestions((prev) => prev.filter((x) => x.id !== s.id));
+    await supabase.from('location_suggestions').update({ status: 'dismissed' }).eq('id', s.id);
+  }
 
   // Pull all campaigns for this client and bucket aggregates by
   // ad_account_id, so each location card can show its real spend +
@@ -146,7 +289,122 @@ export function LocationsTab({ clientId, parentName }: Props) {
   }
 
   return (
-    <div className="grid grid-3 gap-16" style={{ gap: 16 }}>
+    <div className="stack gap-12">
+      {workspace && (
+        <div className="row between">
+          <span className="meta">
+            {detect.running
+              ? 'Scanning the website’s link structure for per-location pages…'
+              : detect.startError
+                ? `⚠ ${detect.startError}`
+                : detect.failed
+                  ? `⚠ ${detect.job?.error ?? 'Detection failed'}`
+                  : detect.completed
+                    ? (detect.job?.result?.new_suggestions ?? 0) > 0
+                      ? `Found ${detect.job?.result?.new_suggestions} new location${
+                          (detect.job?.result?.new_suggestions ?? 0) === 1 ? '' : 's'
+                        } — review below.`
+                      : detect.job?.result?.multi_location
+                        ? 'No new locations — everything detected is already listed or dismissed.'
+                        : 'This looks like a single-location website.'
+                    : ''}
+          </span>
+          <button
+            className="btn ghost sm"
+            disabled={detect.running}
+            title="Re-scan the scraped site structure for per-location pages"
+            onClick={() =>
+              detect.start({
+                type: 'location_detection',
+                workspaceId: workspace.id,
+                clientId,
+                input: {},
+              })
+            }
+          >
+            <Icon name="sparkles" size={13} />{' '}
+            {detect.running ? 'Detecting…' : 'Detect locations'}
+          </button>
+        </div>
+      )}
+
+      {suggestions.length > 0 && (
+        <div className="card card-pad stack gap-10">
+          <div className="row between">
+            <div className="stack" style={{ gap: 2 }}>
+              <div style={{ fontWeight: 500 }}>
+                <Icon name="sparkles" size={13} /> Detected {suggestions.length} location
+                {suggestions.length === 1 ? '' : 's'} on the website
+              </div>
+              <div className="meta">
+                The scraper found what look like per-location pages. Confirm the ones that are
+                real locations — each is created below and its pages are scraped for AI
+                grounding. Dismissed ones won't be suggested again.
+              </div>
+            </div>
+          </div>
+          <div className="stack gap-4">
+            {suggestions.map((s) => (
+              <label
+                key={s.id}
+                className="row gap-8"
+                style={{ alignItems: 'center', cursor: 'pointer' }}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedSuggestions.has(s.id)}
+                  disabled={confirming}
+                  onChange={(e) => {
+                    setSelectedSuggestions((prev) => {
+                      const next = new Set(prev);
+                      if (e.target.checked) next.add(s.id);
+                      else next.delete(s.id);
+                      return next;
+                    });
+                  }}
+                />
+                <span style={{ fontWeight: 500, fontSize: 13 }}>{s.name}</span>
+                <span className="meta mono" style={{ fontSize: 11 }}>
+                  {suggestionPath(s.url)}
+                </span>
+                {s.confidence < 70 && (
+                  <span className="pill amber" style={{ fontSize: 10 }}>
+                    unsure
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="btn ghost sm"
+                  disabled={confirming}
+                  title="Not a location — don't suggest again"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    dismissSuggestion(s);
+                  }}
+                  style={{ marginLeft: 'auto' }}
+                >
+                  Dismiss
+                </button>
+              </label>
+            ))}
+          </div>
+          <div className="row gap-8">
+            <button
+              className="btn primary sm"
+              disabled={confirming || selectedSuggestions.size === 0}
+              onClick={addSelectedSuggestions}
+            >
+              {confirming
+                ? 'Adding…'
+                : `Add ${selectedSuggestions.size} location${
+                    selectedSuggestions.size === 1 ? '' : 's'
+                  }`}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-3 gap-16" style={{ gap: 16 }}>
       {locations.map((l) =>
         formState === l.id ? (
           <LocationForm
@@ -208,8 +466,20 @@ export function LocationsTab({ clientId, parentName }: Props) {
           <span className="meta">Inherits brand rules from parent</span>
         </button>
       )}
+      </div>
     </div>
   );
+}
+
+/** Compact display form of a suggestion URL: path when same-site, host+path
+ * otherwise. */
+function suggestionPath(u: string): string {
+  try {
+    const p = new URL(u);
+    return p.pathname === '/' ? p.hostname : p.pathname.replace(/\/$/, '');
+  } catch {
+    return u;
+  }
 }
 
 function LocationCard({
@@ -260,7 +530,7 @@ function LocationCard({
           )}
           <div className="stack">
             <span style={{ fontWeight: 500, fontSize: 13 }}>{l.name}</span>
-            <span className="meta">{l.address}</span>
+            <span className="meta">{l.address || (l.url ? suggestionPath(l.url) : '')}</span>
           </div>
         </div>
         <Ring p={l.complete} />
@@ -344,6 +614,7 @@ function LocationForm({
 }) {
   const [name, setName] = useState(existing?.name ?? '');
   const [address, setAddress] = useState(existing?.address ?? '');
+  const [url, setUrl] = useState(existing?.url ?? '');
   const [adAccountId, setAdAccountId] = useState(existing?.adAccountId ?? '');
   const [pageId, setPageId] = useState(existing?.pageId ?? '');
   const [igAccountId, setIgAccountId] = useState(existing?.instagramBusinessAccountId ?? '');
@@ -363,25 +634,38 @@ function LocationForm({
     setSubmitting(true);
     setError(null);
 
+    // Normalize the location page URL (accepts bigairusa.com/asheville).
+    const trimmedUrl = url.trim();
+    const normalizedUrl = trimmedUrl
+      ? trimmedUrl.startsWith('http')
+        ? trimmedUrl
+        : `https://${trimmedUrl}`
+      : null;
+
     const payload = {
       client_id: clientId,
       name: name.trim(),
       address: address.trim(),
+      url: normalizedUrl,
       ad_account_id: normalizeAdAccountId(adAccountId) || null,
       page_id: pageId.trim() || null,
       instagram_business_account_id: igAccountId.trim() || null,
     };
 
+    const locationId = existing?.id ?? `${slugify(name)}-${randomSuffix()}`;
     const result = existing
       ? await supabase.from('locations').update(payload).eq('id', existing.id)
-      : await supabase
-          .from('locations')
-          .insert({ ...payload, id: `${slugify(name)}-${randomSuffix()}` });
+      : await supabase.from('locations').insert({ ...payload, id: locationId });
 
     setSubmitting(false);
     if (result.error) {
       setError(result.error.message);
       return;
+    }
+    // A new or changed URL → pull that location's pages in the background,
+    // tagged to the location, so its AI jobs are grounded in its own content.
+    if (normalizedUrl && normalizedUrl !== (existing?.url ?? null)) {
+      scrapeLocationPages(clientId, locationId, normalizedUrl);
     }
     onSaved();
   }
@@ -412,6 +696,17 @@ function LocationForm({
           value={address}
           onChange={(e) => setAddress(e.target.value)}
           placeholder="14290 Plymouth Ave Burnsville MN"
+          style={inputStyle}
+          disabled={submitting}
+        />
+      </label>
+      <label className="stack gap-4">
+        <span className="meta">Location page URL (optional)</span>
+        <input
+          type="text"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="bigairusa.com/asheville"
           style={inputStyle}
           disabled={submitting}
         />
