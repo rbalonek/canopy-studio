@@ -189,16 +189,131 @@ async function safeErrorDetail(resp: Response): Promise<string> {
 }
 
 /** Extract a JSON object from an LLM response that may wrap it in prose
- * or markdown fences. Ported from the donor app's extractJson. */
+ * or markdown fences. Ported from the donor app's extractJson, extended
+ * with a deterministic repair pass: models occasionally emit *malformed*
+ * JSON — an unescaped quote inside ad copy (`"hook": "a "wow" moment"`),
+ * raw newlines inside strings, trailing commas, or a truncated tail —
+ * and one bad character used to fail the whole generation job. Every
+ * candidate is tried verbatim first; repair only runs when strict
+ * parsing has already failed, so well-formed output is never altered. */
 // deno-lint-ignore no-explicit-any
 export function extractJson(text: string): any {
-  try {
-    return JSON.parse(text);
-  } catch (_e) {
-    const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (fence) return JSON.parse(fence[1].trim());
-    const object = text.match(/\{[\s\S]*\}/);
-    if (object) return JSON.parse(object[0]);
-    throw new Error('No JSON object found in model response');
+  const candidates: string[] = [text];
+  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) candidates.push(fence[1].trim());
+  const object = text.match(/\{[\s\S]*\}/);
+  if (object) candidates.push(object[0]);
+
+  let lastErr: unknown = null;
+  for (const c of candidates) {
+    try {
+      return JSON.parse(c);
+    } catch (e) {
+      lastErr = e;
+    }
   }
+  for (const c of candidates) {
+    try {
+      return JSON.parse(repairJson(c));
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw new Error(
+    `Model returned unparseable JSON (${(lastErr as Error | null)?.message ?? 'no JSON object found'})`,
+  );
+}
+
+/** Best-effort mechanical repair of almost-JSON. Walks the text with a
+ * tiny string-state scanner:
+ *  - a `"` inside a string closes it only when the next non-space char
+ *    can legally follow a string (`,` `}` `]` `:` or end) — otherwise
+ *    it's an unescaped inner quote and gets escaped;
+ *  - raw newlines/tabs inside strings become their escapes;
+ *  - an unterminated string and any unclosed braces/brackets are closed
+ *    (truncated responses);
+ *  - trailing commas before `}`/`]` are dropped.
+ * Heuristic by design — it makes typical model slips parseable, not
+ * arbitrary garbage valid. */
+function repairJson(src: string): string {
+  let out = '';
+  let inStr = false;
+  let esc = false;
+  const stack: string[] = [];
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (inStr) {
+      if (esc) {
+        out += ch;
+        esc = false;
+        continue;
+      }
+      if (ch === '\\') {
+        out += ch;
+        esc = true;
+        continue;
+      }
+      if (ch === '\n') {
+        out += '\\n';
+        continue;
+      }
+      if (ch === '\r') continue;
+      if (ch === '\t') {
+        out += '\\t';
+        continue;
+      }
+      if (ch === '"') {
+        let j = i + 1;
+        while (j < src.length && /\s/.test(src[j])) j++;
+        const next = src[j];
+        // A quote followed by a comma is only a real string end when what
+        // comes after the comma can start a JSON value/key ("Say "yes",
+        // then smile" must stay one string).
+        let closes = next === undefined || next === '}' || next === ']' || next === ':';
+        if (next === ',') {
+          let k = j + 1;
+          while (k < src.length && /\s/.test(src[k])) k++;
+          const c2 = src[k];
+          closes =
+            c2 === undefined ||
+            c2 === '"' ||
+            c2 === '{' ||
+            c2 === '[' ||
+            c2 === '-' ||
+            (c2 >= '0' && c2 <= '9') ||
+            src.startsWith('true', k) ||
+            src.startsWith('false', k) ||
+            src.startsWith('null', k);
+        }
+        if (closes) {
+          inStr = false;
+          out += ch;
+        } else {
+          out += '\\"';
+        }
+        continue;
+      }
+      out += ch;
+      continue;
+    }
+    if (ch === '"') {
+      inStr = true;
+      out += ch;
+      continue;
+    }
+    if (ch === '{' || ch === '[') {
+      stack.push(ch === '{' ? '}' : ']');
+      out += ch;
+      continue;
+    }
+    if (ch === '}' || ch === ']') {
+      if (stack[stack.length - 1] === ch) stack.pop();
+      out += ch;
+      continue;
+    }
+    out += ch;
+  }
+  if (inStr) out += '"';
+  while (stack.length) out += stack.pop();
+  return out.replace(/,\s*([}\]])/g, '$1');
 }
