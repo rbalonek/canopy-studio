@@ -221,17 +221,36 @@ const copyGeneration: SpecBuilder = async (service, job) => {
   };
 };
 
-/** creative_directions — 3 concept angles offered before generating. */
+/** creative_directions — 3 concept angles offered before generating.
+ * Re-runs can carry user feedback (input.adjustments) plus the directions
+ * the user was looking at (input.previous_directions), so feedback like
+ * "combine 1 and 2" or "something completely different" has referents —
+ * the numbered list is prepended to the adjustments block verbatim. */
 const creativeDirections: SpecBuilder = async (service, job) => {
   const scope = await loadGenerationScope(service, job, 'creative_directions');
   const adjustments = (job.input?.adjustments as string | undefined) ?? '';
+  const previous = Array.isArray(job.input?.previous_directions)
+    ? (job.input.previous_directions as Array<{ title?: string; hook?: string; description?: string }>)
+    : [];
+
+  // Compose the feedback block here rather than rewording the ported prompt:
+  // buildCreativeDirectionsPrompt inserts it under "USER FEEDBACK/ADJUSTMENTS".
+  const adjBlock = previous.length
+    ? `You previously suggested these directions:
+${previous
+  .map((d, i) => `${i + 1}. "${d.title ?? 'Untitled'}" — ${d.hook ?? ''}${d.description ? ` (${d.description})` : ''}`)
+  .join('\n')}
+
+The user's feedback on them: ${adjustments || 'Generate 3 meaningfully different new directions.'}
+Numbered references in the feedback ("1", "direction 2") refer to the list above. Apply the feedback faithfully — e.g. merge two directions into one stronger concept, keep one and replace the rest, or discard them all — and still return exactly 3 directions.`
+    : adjustments;
 
   return {
     system: scope.system,
     user: buildCreativeDirectionsPrompt(
       scope.client,
       scope.campaign,
-      adjustments,
+      adjBlock,
       scope.sourceContent,
       scope.parent,
     ),

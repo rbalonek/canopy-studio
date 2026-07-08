@@ -58,6 +58,8 @@ export function LiveAdStudio({
   // Directions state
   const [directionsJobId, setDirectionsJobId] = useState<string | null>(null);
   const [directions, setDirections] = useState<Direction[] | null>(null);
+  // Free-text feedback on the drafted directions ("combine 1 and 2", …).
+  const [directionFeedback, setDirectionFeedback] = useState('');
   const [selectedDirection, setSelectedDirection] = useState<Direction | null>(null);
 
   // Copy state
@@ -119,7 +121,7 @@ export function LiveAdStudio({
     ...(locationId ? { location_id: locationId } : {}),
   };
 
-  async function startDirections(adjustments?: string) {
+  async function startDirections(adjustments?: string, previous?: Direction[] | null) {
     if (!workspace || !clientId) return;
     setError(null);
     setDirections(null);
@@ -129,7 +131,13 @@ export function LiveAdStudio({
         type: 'creative_directions',
         workspaceId: workspace.id,
         clientId,
-        input: { ...briefInput, ...(adjustments ? { adjustments } : {}) },
+        input: {
+          ...briefInput,
+          ...(adjustments ? { adjustments } : {}),
+          // Ship the directions the user was looking at so feedback like
+          // "combine 1 and 2" has referents on the model side.
+          ...(previous?.length ? { previous_directions: previous } : {}),
+        },
       });
       setDirectionsJobId(id);
     } catch (e) {
@@ -419,7 +427,9 @@ export function LiveAdStudio({
               <button
                 className="btn ai sm"
                 disabled={generating}
-                onClick={() => startDirections('Give me 3 fresh, different angles.')}
+                onClick={() =>
+                  startDirections('Give me 3 fresh, different angles.', directions)
+                }
               >
                 <Icon name="sparkles" size={12} /> Regenerate all
               </button>
@@ -478,6 +488,39 @@ export function LiveAdStudio({
                     </div>
                   );
                 })}
+              </div>
+              <div
+                className="card-pad row gap-8"
+                style={{ borderTop: '1px solid var(--border)' }}
+              >
+                <input
+                  className="input"
+                  type="text"
+                  value={directionFeedback}
+                  onChange={(e) => setDirectionFeedback(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && directionFeedback.trim() && !generating) {
+                      e.preventDefault();
+                      const fb = directionFeedback.trim();
+                      setDirectionFeedback('');
+                      startDirections(fb, directions);
+                    }
+                  }}
+                  placeholder='Adjust these — e.g. "combine 1 and 2", "something completely different", "more playful tone"'
+                  disabled={generating}
+                  style={{ flex: 1, fontSize: 13 }}
+                />
+                <button
+                  className="btn ai sm"
+                  disabled={generating || !directionFeedback.trim()}
+                  onClick={() => {
+                    const fb = directionFeedback.trim();
+                    setDirectionFeedback('');
+                    startDirections(fb, directions);
+                  }}
+                >
+                  <Icon name="sparkles" size={12} /> Redraft
+                </button>
               </div>
               <div
                 className="card-pad row between"
