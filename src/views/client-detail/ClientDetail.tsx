@@ -6,6 +6,7 @@ import { useQuery } from '../../data/context';
 import type { ClientHeader } from '../../data/types';
 import { useAppState } from '../../shell/AppState';
 import { useWorkspace } from '../../workspace/WorkspaceProvider';
+import { ClientFormModal } from '../ClientFormModal';
 import { AdAccountsTab } from './AdAccountsTab';
 import { AssetsTab } from './AssetsTab';
 import { BrandTab } from './BrandTab';
@@ -34,12 +35,35 @@ export function ClientDetail() {
   const shellPrefix = workspace ? `/app/${workspace.slug}` : '/dev';
   const clientsPath = `${shellPrefix}/clients`;
 
+  // bump forces a header re-fetch after the client is edited.
+  const [bump, setBump] = useState(0);
   const { data: header, loading } = useQuery<ClientHeader | null>(
     (p) => p.getClientHeader(clientId),
-    [clientId],
+    [clientId, bump],
   );
 
   const [tab, setTab] = useState<TabId>('overview');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const singular = state.mode === 'agency' ? 'client' : 'location';
+
+  async function onDeleteClient() {
+    setMenuOpen(false);
+    if (!supabase) return;
+    if (
+      !confirm(
+        `Delete "${header?.name ?? clientId}"? This permanently removes the ${singular} and ALL its data — locations, campaign history, scraped pages, brand profile, saved generations. This can't be undone.`,
+      )
+    ) {
+      return;
+    }
+    const { error } = await supabase.from('clients').delete().eq('id', clientId);
+    if (error) {
+      setRefreshMsg({ kind: 'err', text: `Delete failed: ${error.message}` });
+      return;
+    }
+    navigate(clientsPath);
+  }
   const tabs: TabId[] = state.mode === 'agency' ? [...BASE_TABS, 'locations'] : BASE_TABS;
 
   // Live only: show the brand logo (if analyzed/entered) in place of the
@@ -183,9 +207,49 @@ export function ClientDetail() {
           <button className="btn ai">
             <Icon name="sparkles" size={14} /> AI analyze
           </button>
-          <button className="btn ghost">
-            <Icon name="dots" size={14} />
-          </button>
+          <div style={{ position: 'relative' }}>
+            <button className="btn ghost" onClick={() => setMenuOpen((o) => !o)}>
+              <Icon name="dots" size={14} />
+            </button>
+            {menuOpen && (
+              <>
+                {/* click-away backdrop */}
+                <div
+                  style={{ position: 'fixed', inset: 0, zIndex: 40 }}
+                  onClick={() => setMenuOpen(false)}
+                />
+                <div
+                  className="card stack"
+                  style={{
+                    position: 'absolute',
+                    right: 0,
+                    top: 'calc(100% + 6px)',
+                    zIndex: 41,
+                    minWidth: 160,
+                    padding: 4,
+                  }}
+                >
+                  <button
+                    className="btn ghost sm"
+                    style={{ justifyContent: 'flex-start' }}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setEditing(true);
+                    }}
+                  >
+                    <Icon name="gear" size={13} /> Edit {singular}
+                  </button>
+                  <button
+                    className="btn ghost sm"
+                    style={{ justifyContent: 'flex-start', color: 'var(--danger, #c33)' }}
+                    onClick={onDeleteClient}
+                  >
+                    <Icon name="close" size={13} /> Delete {singular}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
       {refreshMsg && (
@@ -234,6 +298,19 @@ export function ClientDetail() {
           <span className="h2" style={{ textTransform: 'capitalize' }}>{tab}</span>
           <span className="meta">Coming next — this tab isn't wired up yet.</span>
         </div>
+      )}
+
+      {editing && (
+        <ClientFormModal
+          singular={singular}
+          workspaceId={workspace?.id ?? null}
+          existingId={clientId}
+          onClose={() => setEditing(false)}
+          onSaved={() => {
+            setEditing(false);
+            setBump((b) => b + 1);
+          }}
+        />
       )}
     </div>
   );

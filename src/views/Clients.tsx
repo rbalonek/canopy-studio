@@ -7,6 +7,7 @@ import { useQuery } from '../data/context';
 import type { ClientCard } from '../data/types';
 import { useAppState } from '../shell/AppState';
 import { useWorkspace } from '../workspace/WorkspaceProvider';
+import { ClientFormModal } from './ClientFormModal';
 
 const FILTER_CHIPS = ['Active campaigns', 'Has META', 'Multi-location', 'Brand 100%', 'Industry: Dental'];
 
@@ -21,6 +22,7 @@ export function Clients() {
 
   const { data: cards } = useQuery<ClientCard[]>((p) => p.listClientCards());
   const [layout, setLayout] = useState<Layout>('grid');
+  const [showAdd, setShowAdd] = useState(false);
   const shellPrefix = workspace ? `/app/${workspace.slug}` : '/dev';
   const goToClient = (id: string) => navigate(`${shellPrefix}/clients/${id}`);
 
@@ -108,7 +110,7 @@ export function Clients() {
               <Icon name="list" size={12} />
             </button>
           </div>
-          <button className="btn primary">
+          <button className="btn primary" onClick={() => setShowAdd(true)}>
             <Icon name="plus" size={13} /> Add {singular}
           </button>
         </div>
@@ -189,6 +191,15 @@ export function Clients() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {showAdd && (
+        <ClientFormModal
+          singular={singular}
+          workspaceId={workspace?.id ?? null}
+          onClose={() => setShowAdd(false)}
+          onSaved={goToClient}
+        />
       )}
     </div>
   );
