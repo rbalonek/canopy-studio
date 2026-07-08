@@ -3,9 +3,11 @@ import { supabase } from '../auth/supabaseClient';
 import { Empty } from '../components/Empty';
 import { Icon } from '../components/Icon';
 import { useWorkspace } from '../workspace/WorkspaceProvider';
+import { AccountTab } from './settings/AccountTab';
 import { AiSettingsTab } from './settings/AiSettingsTab';
 import { ConnectorsPanel } from './settings/ConnectorsPanel';
 import { SkillsTab } from './settings/SkillsTab';
+import { WorkspaceTab } from './settings/WorkspaceTab';
 
 type TabId =
   | 'account'
@@ -62,7 +64,11 @@ export function Settings() {
           ))}
         </div>
         <div>
-          {tab === 'connections' ? (
+          {tab === 'account' ? (
+            <AccountTab />
+          ) : tab === 'workspace' ? (
+            <WorkspaceTab />
+          ) : tab === 'connections' ? (
             <ConnectionsTab />
           ) : tab === 'ai' ? (
             <AiSettingsTab />
