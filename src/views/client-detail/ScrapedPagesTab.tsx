@@ -12,6 +12,10 @@ type DomainRow = {
   pages_discovered: number;
   pages_indexed: number;
   last_crawled_at: string | null;
+  /** Full discovery set from the last full scrape (capped at 300). Powers
+   * the "pick from discovered pages" list in the Add-pages panel. Null on
+   * domains whose last scrape predates the recording feature. */
+  discovered_urls: string[] | null;
 };
 
 /** Page exclusion state. Mirrors scraped_pages.excluded:
@@ -53,6 +57,9 @@ export function ScrapedPagesTab({ clientId }: { clientId: string }) {
   const [adding, setAdding] = useState(false);
   const [addUrls, setAddUrls] = useState('');
   const [showAdd, setShowAdd] = useState(false);
+  // Checked entries in the discovered-pages picker + its filter text.
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [pickFilter, setPickFilter] = useState('');
   const [editor, setEditor] = useState<PageRow | null>(null);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
@@ -67,7 +74,7 @@ export function ScrapedPagesTab({ clientId }: { clientId: string }) {
       supabase
         .from('scraped_domains')
         .select(
-          'id, domain, health, sitemap_status, pages_discovered, pages_indexed, last_crawled_at',
+          'id, domain, health, sitemap_status, pages_discovered, pages_indexed, last_crawled_at, discovered_urls',
         )
         .eq('client_id', clientId)
         .is('competitor_id', null)
@@ -141,13 +148,14 @@ export function ScrapedPagesTab({ clientId }: { clientId: string }) {
     refresh();
   }
 
-  // Add-mode: scrape only the URLs the user pasted, leaving existing pages
-  // untouched. Accepts newline / comma / space separated URLs or paths.
+  // Add-mode: scrape only the URLs the user pasted and/or checked in the
+  // discovered-pages picker, leaving existing pages untouched. Accepts
+  // newline / comma / space separated URLs or paths.
   async function onAddPages() {
     if (!supabase) return;
     const seed = website ?? domains?.[0]?.domain ?? '';
     const base = seed ? (seed.startsWith('http') ? seed : `https://${seed}`) : '';
-    const urls = addUrls
+    const typed = addUrls
       .split(/[\s,]+/)
       .map((s) => s.trim())
       .filter(Boolean)
@@ -162,8 +170,15 @@ export function ScrapedPagesTab({ clientId }: { clientId: string }) {
         }
         return `https://${s}`;
       });
+    const urls = Array.from(new Set([...typed, ...picked]));
     if (urls.length === 0) {
-      setMsg({ kind: 'err', text: 'Enter one or more page URLs to add.' });
+      setMsg({ kind: 'err', text: 'Enter or pick one or more page URLs to add.' });
+      return;
+    }
+    // Each page is a live fetch inside one function invocation (~10s timeout
+    // apiece within a ~150s budget) — keep a batch comfortably under that.
+    if (urls.length > 20) {
+      setMsg({ kind: 'err', text: `That's ${urls.length} pages — add at most 20 per batch.` });
       return;
     }
     setAdding(true);
@@ -185,6 +200,7 @@ export function ScrapedPagesTab({ clientId }: { clientId: string }) {
       text: `Added ${data.pages_scraped} page${data.pages_scraped === 1 ? '' : 's'}. Updating the brand profile…`,
     });
     setAddUrls('');
+    setPicked(new Set());
     setShowAdd(false);
     reanalyze(base || urls[0]);
     refresh();
@@ -205,6 +221,18 @@ export function ScrapedPagesTab({ clientId }: { clientId: string }) {
       refresh();
     }
   }
+
+  // Discovered-but-unscraped pages for the picker. Recorded by full scrapes
+  // since the detection feature; older domains just have no list to offer.
+  const indexedUrls = new Set((pages ?? []).map((p) => normUrl(p.url)));
+  const discoveredAvailable = Array.from(
+    new Set((domains ?? []).flatMap((d) => d.discovered_urls ?? [])),
+  ).filter((u) => !indexedUrls.has(normUrl(u)));
+  const filteredDiscovered = pickFilter.trim()
+    ? discoveredAvailable.filter((u) =>
+        u.toLowerCase().includes(pickFilter.trim().toLowerCase()),
+      )
+    : discoveredAvailable;
 
   if (domains === null || pages === null) {
     return <div className="meta">Loading…</div>;
@@ -290,9 +318,66 @@ export function ScrapedPagesTab({ clientId }: { clientId: string }) {
             onChange={(e) => setAddUrls(e.target.value)}
             style={{ resize: 'vertical', fontFamily: 'var(--mono, monospace)', fontSize: 12 }}
           />
+          {discoveredAvailable.length > 0 && (
+            <div className="stack gap-6">
+              <div className="meta">
+                Or pick from the pages the last scrape discovered but didn't index (
+                {discoveredAvailable.length} available, up to 20 per batch):
+              </div>
+              <input
+                className="input"
+                type="text"
+                placeholder="Filter paths… e.g. birthday"
+                value={pickFilter}
+                onChange={(e) => setPickFilter(e.target.value)}
+                style={{ fontSize: 12 }}
+              />
+              <div
+                className="stack gap-2"
+                style={{
+                  maxHeight: 220,
+                  overflowY: 'auto',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  padding: 8,
+                }}
+              >
+                {filteredDiscovered.length === 0 ? (
+                  <span className="meta">No discovered pages match that filter.</span>
+                ) : (
+                  filteredDiscovered.map((u) => (
+                    <label
+                      key={u}
+                      className="row gap-6"
+                      style={{ alignItems: 'center', cursor: 'pointer' }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={picked.has(u)}
+                        disabled={adding}
+                        onChange={(e) => {
+                          setPicked((prev) => {
+                            const next = new Set(prev);
+                            if (e.target.checked) next.add(u);
+                            else next.delete(u);
+                            return next;
+                          });
+                        }}
+                      />
+                      <span className="mono" style={{ fontSize: 11 }}>
+                        {safePath(u)}
+                      </span>
+                    </label>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
           <div className="row gap-8">
             <button className="btn primary" disabled={adding} onClick={onAddPages}>
-              {adding ? 'Adding…' : 'Add pages'}
+              {adding
+                ? 'Adding…'
+                : `Add pages${picked.size ? ` (${picked.size} picked)` : ''}`}
             </button>
             <button className="btn ghost" disabled={adding} onClick={() => setShowAdd(false)}>
               Cancel
@@ -580,6 +665,19 @@ function safeHost(u: string): string {
     return new URL(u).hostname;
   } catch {
     return '';
+  }
+}
+/** Canonical form for "is this URL already indexed" checks: ignore
+ * www/hash/trailing-slash differences so the picker doesn't re-offer a
+ * page that's already in the table. */
+function normUrl(u: string): string {
+  try {
+    const p = new URL(u);
+    return (
+      p.hostname.replace(/^www\./i, '') + p.pathname.replace(/\/+$/, '') + p.search
+    ).toLowerCase();
+  } catch {
+    return u.toLowerCase();
   }
 }
 function safePath(u: string): string {
