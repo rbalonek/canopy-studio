@@ -51,7 +51,7 @@ Deno.serve(async (req) => {
     const { data: post } = await caller.userClient
       .from('content_posts')
       .select(
-        'id, workspace_id, client_id, location_id, channels, format, topic, caption_fb, caption_ig, image_url, status',
+        'id, workspace_id, client_id, location_id, channels, format, topic, caption_fb, caption_ig, image_url, media_type, video_url, link_url, status',
       )
       .eq('id', body.content_post_id)
       .maybeSingle();
@@ -71,10 +71,29 @@ Deno.serve(async (req) => {
     if (!wantFb && !wantIg) {
       return json({ ok: false, error: 'This post has no channels selected' }, 400);
     }
-    // IG hard requirement: an image. Text-only IG posts don't exist in the API.
-    if (wantIg && !post.image_url) {
+
+    const mediaType = (post.media_type as string | null) ?? 'image';
+    // Per-type requirements — checked up front so nothing publishes to one
+    // channel while the other was doomed from the start.
+    if (mediaType === 'video' && !post.video_url) {
+      return json({ ok: false, error: 'This is a video post but it has no video URL' }, 400);
+    }
+    if (mediaType === 'link' && !post.link_url) {
+      return json({ ok: false, error: 'This is a link post but it has no link URL' }, 400);
+    }
+    if (mediaType === 'link' && wantIg) {
+      // No such thing as an IG link post — feed captions can't carry
+      // clickable links.
       return json(
-        { ok: false, error: 'Instagram requires an image — add an image URL to the post, or turn Instagram off for now' },
+        { ok: false, error: 'Instagram does not support link posts — switch the media type or turn Instagram off' },
+        400,
+      );
+    }
+    // IG hard requirement for image posts: an image. Text-only IG posts
+    // don't exist in the API.
+    if (mediaType === 'image' && wantIg && !post.image_url) {
+      return json(
+        { ok: false, error: 'Instagram requires an image — add or generate one, or turn Instagram off for now' },
         400,
       );
     }
@@ -122,7 +141,19 @@ Deno.serve(async (req) => {
         const pageToken = await getPageToken(targets.pageId!, userToken);
         const message = (post.caption_fb as string | null) ?? '';
         let fbId: string;
-        if (post.image_url) {
+        if (mediaType === 'video') {
+          const r = await graphPost(`${targets.pageId}/videos`, pageToken, {
+            file_url: post.video_url as string,
+            ...(message ? { description: message } : {}),
+          });
+          fbId = r.id;
+        } else if (mediaType === 'link') {
+          const r = await graphPost(`${targets.pageId}/feed`, pageToken, {
+            message,
+            link: post.link_url as string,
+          });
+          fbId = r.id;
+        } else if (post.image_url) {
           const r = await graphPost(`${targets.pageId}/photos`, pageToken, {
             url: post.image_url as string,
             ...(message ? { caption: message } : {}),
@@ -139,13 +170,25 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ---- Instagram (two-step) ----
+    // ---- Instagram (container → publish) ----
     if (wantIg) {
       try {
-        const container = await graphPost(`${targets.igUserId}/media`, userToken, {
-          image_url: post.image_url as string,
-          ...(post.caption_ig ? { caption: post.caption_ig as string } : {}),
-        });
+        let container: any;
+        if (mediaType === 'video') {
+          // IG feed video = Reels. The container processes ASYNC — publishing
+          // before it's FINISHED errors, so poll its status (bounded).
+          container = await graphPost(`${targets.igUserId}/media`, userToken, {
+            media_type: 'REELS',
+            video_url: post.video_url as string,
+            ...(post.caption_ig ? { caption: post.caption_ig as string } : {}),
+          });
+          await waitForContainer(container.id as string, userToken);
+        } else {
+          container = await graphPost(`${targets.igUserId}/media`, userToken, {
+            image_url: post.image_url as string,
+            ...(post.caption_ig ? { caption: post.caption_ig as string } : {}),
+          });
+        }
         const published = await graphPost(`${targets.igUserId}/media_publish`, userToken, {
           creation_id: container.id,
         });
@@ -198,6 +241,26 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: (e as Error).message }, 500);
   }
 });
+
+/** Poll an async IG media container (video/Reels processing) until it's
+ * ready to publish. Bounded: ~90s, then a clear error rather than an
+ * opaque media_publish failure. */
+async function waitForContainer(containerId: string, token: string): Promise<void> {
+  const deadline = Date.now() + 90_000;
+  while (Date.now() < deadline) {
+    const resp = await fetch(
+      `${META_GRAPH}/${containerId}?fields=status_code&access_token=${encodeURIComponent(token)}`,
+    );
+    const data = await resp.json().catch(() => ({}));
+    const status = data?.status_code as string | undefined;
+    if (status === 'FINISHED') return;
+    if (status === 'ERROR' || status === 'EXPIRED') {
+      throw new Error(`Instagram video processing ${status.toLowerCase()} — check the video format (MP4/MOV, ≤90s for Reels)`);
+    }
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  throw new Error('Instagram video is still processing after 90s — try publishing again in a minute');
+}
 
 /** Exchange the configured user/system-user token for a Page access token
  * (required to post to a Page feed). System-user tokens often return

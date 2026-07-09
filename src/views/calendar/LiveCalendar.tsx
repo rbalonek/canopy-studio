@@ -21,6 +21,7 @@ type PostFormat = 'post' | 'reel' | 'carousel' | 'story';
 
 interface PlanRow {
   id: string;
+  client_id: string;
   title: string;
   objective: string;
   channels: string[];
@@ -32,9 +33,12 @@ interface PlanRow {
   updated_at: string;
 }
 
+type MediaType = 'image' | 'video' | 'link';
+
 interface PostRow {
   id: string;
   plan_id: string | null;
+  client_id: string;
   scheduled_date: string;
   scheduled_time: string;
   channels: string[];
@@ -44,12 +48,15 @@ interface PostRow {
   caption_ig: string | null;
   image_prompt: string | null;
   image_url: string | null;
+  media_type: MediaType;
+  video_url: string | null;
+  link_url: string | null;
   status: PostStatus;
   publish_error: string | null;
 }
 
 const POSTS_SELECT =
-  'id, plan_id, scheduled_date, scheduled_time, channels, format, topic, caption_fb, caption_ig, image_prompt, image_url, status, publish_error';
+  'id, plan_id, client_id, scheduled_date, scheduled_time, channels, format, topic, caption_fb, caption_ig, image_prompt, image_url, media_type, video_url, link_url, status, publish_error';
 
 const CADENCES: Array<{ perWeek: number; label: string }> = [
   { perWeek: 7, label: 'Daily' },
@@ -90,11 +97,16 @@ function addDays(d: Date, n: number): Date {
   return out;
 }
 
-export function LiveCalendar() {
+export function LiveCalendar({ clientId: scopedClientId }: { clientId?: string } = {}) {
   const workspace = useWorkspace();
+  // Scoped mounts (a client's Calendar tab) pin the client and render
+  // inside the client page's own header/content wrapper.
+  const embedded = !!scopedClientId;
 
   const [clients, setClients] = useState<Array<{ id: string; name: string }>>([]);
-  const [clientId, setClientId] = useState<string | null>(null);
+  // null = "All clients" (unscoped view only): every client's posts on one
+  // calendar, plans listed with client names, composer picks the client.
+  const [clientId, setClientId] = useState<string | null>(scopedClientId ?? null);
 
   const [plans, setPlans] = useState<PlanRow[] | null>(null);
   const [posts, setPosts] = useState<PostRow[] | null>(null);
@@ -102,7 +114,10 @@ export function LiveCalendar() {
 
   // Composer state
   const [composerOpen, setComposerOpen] = useState(false);
+  // In "All clients" mode the composer carries its own client choice.
+  const [planClientId, setPlanClientId] = useState<string | null>(null);
   const [objective, setObjective] = useState('');
+  const [sourceUrl, setSourceUrl] = useState('');
   const [chanFb, setChanFb] = useState(true);
   const [chanIg, setChanIg] = useState(true);
   const [startDate, setStartDate] = useState(() => isoDate(addDays(new Date(), 1)));
@@ -124,7 +139,7 @@ export function LiveCalendar() {
 
   const [error, setError] = useState<string | null>(null);
 
-  // Client picker
+  // Client list (names for the picker, chip labels, composer select).
   useEffect(() => {
     if (!supabase || !workspace) return;
     supabase
@@ -135,31 +150,34 @@ export function LiveCalendar() {
       .then(({ data }) => {
         const rows = (data ?? []) as Array<{ id: string; name: string }>;
         setClients(rows);
-        if (rows.length > 0) setClientId((prev) => prev ?? rows[0].id);
+        setPlanClientId((prev) => prev ?? rows[0]?.id ?? null);
       });
   }, [workspace?.id]);
 
-  // Plans + posts for the selected client
+  // Plans + posts — one client, or the whole workspace ("All clients").
   useEffect(() => {
-    if (!supabase || !clientId) return;
+    if (!supabase || !workspace) return;
     let cancelled = false;
+    const [scopeCol, scopeVal] = clientId
+      ? ['client_id', clientId]
+      : ['workspace_id', workspace.id];
     supabase
       .from('content_plans')
       .select(
-        'id, title, objective, channels, start_date, end_date, posts_per_week, summary, status, updated_at',
+        'id, client_id, title, objective, channels, start_date, end_date, posts_per_week, summary, status, updated_at',
       )
-      .eq('client_id', clientId)
+      .eq(scopeCol, scopeVal)
       .order('updated_at', { ascending: false })
       .then(({ data }) => {
         if (cancelled) return;
         const rows = (data ?? []) as unknown as PlanRow[];
         setPlans(rows);
-        setComposerOpen((open) => open || rows.length === 0);
+        setComposerOpen((open) => open || (rows.length === 0 && !!clientId));
       });
     supabase
       .from('content_posts')
       .select(POSTS_SELECT)
-      .eq('client_id', clientId)
+      .eq(scopeCol, scopeVal)
       .order('scheduled_date')
       .then(({ data }) => {
         if (!cancelled) setPosts((data ?? []) as unknown as PostRow[]);
@@ -167,7 +185,7 @@ export function LiveCalendar() {
     return () => {
       cancelled = true;
     };
-  }, [clientId, reloadTick]);
+  }, [clientId, workspace?.id, reloadTick]);
 
   // Plan job finished → reload and jump the calendar to the plan's start.
   useEffect(() => {
@@ -190,15 +208,19 @@ export function LiveCalendar() {
 
   const selectedPost = (posts ?? []).find((p) => p.id === selectedId) ?? null;
 
+  // The client a new plan is created for: the pinned/selected one, or the
+  // composer's own choice in "All clients" mode.
+  const composerClientId = clientId ?? planClientId;
+
   async function startPlan() {
-    if (!workspace || !clientId) return;
+    if (!workspace || !composerClientId) return;
     setError(null);
     const channels = [chanFb ? 'facebook' : null, chanIg ? 'instagram' : null].filter(Boolean);
     try {
       const id = await enqueueJob({
         type: 'content_plan',
         workspaceId: workspace.id,
-        clientId,
+        clientId: composerClientId,
         input: {
           objective,
           channels,
@@ -207,6 +229,7 @@ export function LiveCalendar() {
           posts_per_week: perWeek,
           post_time: postTime,
           additional_context: extraContext,
+          ...(sourceUrl.trim() ? { source_url: sourceUrl.trim() } : {}),
         },
       });
       setPlanJobId(id);
@@ -273,8 +296,9 @@ export function LiveCalendar() {
 
   if (!workspace) return null;
 
-  const briefReady = !!clientId && objective.trim().length > 0 && (chanFb || chanIg);
+  const briefReady = !!composerClientId && objective.trim().length > 0 && (chanFb || chanIg);
   const generating = planJob.running;
+  const clientName = (id: string) => clients.find((c) => c.id === id)?.name ?? id;
 
   // Month grid cells
   const firstDow = new Date(cursor.year, cursor.month, 1).getDay();
@@ -293,16 +317,18 @@ export function LiveCalendar() {
   );
 
   return (
-    <div className="content wide">
+    <div className={embedded ? 'stack' : 'content wide'}>
       <div className="row between" style={{ marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
-        <div className="stack gap-4">
-          <h1 className="h0">Content Calendar</h1>
-          <span className="meta">
-            AI-planned Facebook + Instagram posts, one calendar per client.
-          </span>
-        </div>
+        {!embedded && (
+          <div className="stack gap-4">
+            <h1 className="h0">Content Calendar</h1>
+            <span className="meta">
+              AI-planned Facebook + Instagram posts — all clients at a glance, or one at a time.
+            </span>
+          </div>
+        )}
         <div className="row gap-8">
-          {clients.length > 0 && (
+          {!embedded && clients.length > 0 && (
             <select
               value={clientId ?? ''}
               onChange={(e) => {
@@ -311,6 +337,7 @@ export function LiveCalendar() {
               }}
               style={fieldStyle}
             >
+              <option value="">All clients</option>
               {clients.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -324,12 +351,12 @@ export function LiveCalendar() {
         </div>
       </div>
 
-      {clients.length === 0 && (
+      {clients.length === 0 && !embedded && (
         <div className="card card-pad meta">Add a client first — plans hang off a client.</div>
       )}
 
       {/* ---- Plan brief ---- */}
-      {composerOpen && clientId && (
+      {composerOpen && (
         <div className="card" style={{ marginBottom: 16, borderLeft: '3px solid var(--accent)' }}>
           <div className="card-pad stack gap-4" style={{ borderBottom: '1px solid var(--border)' }}>
             <span className="h2">Plan a run of posts</span>
@@ -339,6 +366,24 @@ export function LiveCalendar() {
             </span>
           </div>
           <div className="card-pad stack gap-12">
+            {!clientId && (
+              <label className="stack gap-4" style={{ maxWidth: 280 }}>
+                <span className="meta">Client</span>
+                <select
+                  value={planClientId ?? ''}
+                  onChange={(e) => setPlanClientId(e.target.value || null)}
+                  style={fieldStyle}
+                  disabled={generating}
+                >
+                  {clients.length === 0 && <option value="">No clients yet</option>}
+                  {clients.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <label className="stack gap-4">
               <span className="meta">What should this content achieve?</span>
               <textarea
@@ -419,6 +464,18 @@ export function LiveCalendar() {
                 />
               </label>
             </div>
+            <label className="stack gap-4">
+              <span className="meta">
+                Build it around a URL (optional — a blog post or offer page; we'll read it)
+              </span>
+              <input
+                value={sourceUrl}
+                onChange={(e) => setSourceUrl(e.target.value)}
+                placeholder="https://yoursite.com/blog/that-post"
+                style={fieldStyle}
+                disabled={generating}
+              />
+            </label>
             <label className="stack gap-4">
               <span className="meta">Extra context (optional)</span>
               <input
@@ -506,6 +563,11 @@ export function LiveCalendar() {
                 <div className="stack gap-2" style={{ minWidth: 0 }}>
                   <div className="row gap-8">
                     <span style={{ fontWeight: 500 }}>{plan.title || 'Untitled plan'}</span>
+                    {!clientId && !embedded && (
+                      <span className="pill teal" style={{ fontSize: 10 }}>
+                        {clientName(plan.client_id)}
+                      </span>
+                    )}
                     <span className="pill gray" style={{ fontSize: 10 }}>
                       {planPosts.length} posts
                     </span>
@@ -657,6 +719,7 @@ export function LiveCalendar() {
                           whiteSpace: 'nowrap',
                         }}
                       >
+                        {!clientId && !embedded ? `${clientName(p.client_id)} · ` : ''}
                         {p.topic || '(untitled)'}
                       </span>
                     </div>
@@ -722,12 +785,17 @@ function PostEditor({
   const [captionIg, setCaptionIg] = useState(post.caption_ig ?? '');
   const [imagePrompt, setImagePrompt] = useState(post.image_prompt ?? '');
   const [imageUrl, setImageUrl] = useState(post.image_url ?? '');
+  const [mediaType, setMediaType] = useState<MediaType>(post.media_type ?? 'image');
+  const [videoUrl, setVideoUrl] = useState(post.video_url ?? '');
+  const [linkUrl, setLinkUrl] = useState(post.link_url ?? '');
   const [format, setFormat] = useState<PostFormat>(post.format);
   const [date, setDate] = useState(post.scheduled_date);
   const [time, setTime] = useState(post.scheduled_time.slice(0, 5));
   const [fb, setFb] = useState(post.channels.includes('facebook'));
   const [ig, setIg] = useState(post.channels.includes('instagram'));
   const [saving, setSaving] = useState(false);
+  const [genBusy, setGenBusy] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
 
   const dirty =
     topic !== post.topic ||
@@ -735,6 +803,9 @@ function PostEditor({
     captionIg !== (post.caption_ig ?? '') ||
     imagePrompt !== (post.image_prompt ?? '') ||
     imageUrl !== (post.image_url ?? '') ||
+    mediaType !== (post.media_type ?? 'image') ||
+    videoUrl !== (post.video_url ?? '') ||
+    linkUrl !== (post.link_url ?? '') ||
     format !== post.format ||
     date !== post.scheduled_date ||
     time !== post.scheduled_time.slice(0, 5) ||
@@ -749,6 +820,9 @@ function PostEditor({
       caption_ig: ig ? captionIg || null : null,
       image_prompt: imagePrompt || null,
       image_url: imageUrl || null,
+      media_type: mediaType,
+      video_url: videoUrl || null,
+      link_url: linkUrl || null,
       format,
       scheduled_date: date,
       scheduled_time: time,
@@ -756,6 +830,33 @@ function PostEditor({
       ...extra,
     });
     setSaving(false);
+  }
+
+  /** Generate the image from the on-screen brief via the configured
+   * provider (Settings → AI → Image generation; xAI by default). The
+   * function writes image_url on the row; mirror it locally. */
+  async function generateImage() {
+    if (!supabase) return;
+    setGenBusy(true);
+    setGenError(null);
+    const { data, error } = await supabase.functions.invoke('generate-post-image', {
+      body: { content_post_id: post.id, ...(imagePrompt.trim() ? { prompt: imagePrompt.trim() } : {}) },
+    });
+    setGenBusy(false);
+    if (error || !data?.ok) {
+      let text: string | null = (data?.error as string | undefined) ?? null;
+      if (!text && error && 'context' in error) {
+        try {
+          text = (await (error.context as Response).json())?.error ?? null;
+        } catch {
+          /* not JSON */
+        }
+      }
+      setGenError(text ?? error?.message ?? 'Image generation failed');
+      return;
+    }
+    setImageUrl(data.image_url as string);
+    onPatch({ image_url: data.image_url as string }); // sync local rows state
   }
 
   return (
@@ -839,37 +940,95 @@ function PostEditor({
           )}
         </div>
 
-        <div className="row gap-12" style={{ flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <label className="stack gap-4" style={{ flex: 1, minWidth: 260 }}>
-            <span className="meta">
-              Image brief (used by image generation — configure the provider in Settings → AI)
-            </span>
-            <textarea
-              value={imagePrompt}
-              onChange={(e) => setImagePrompt(e.target.value)}
-              style={{ ...fieldStyle, minHeight: 60, resize: 'vertical' }}
-            />
-          </label>
-          <label className="stack gap-4" style={{ flex: 1, minWidth: 260 }}>
-            <span className="meta">
-              Image URL (public — required to post to Instagram; paste one or an asset URL)
-            </span>
-            <input
-              value={imageUrl}
-              onChange={(e) => setImageUrl(e.target.value)}
-              placeholder="https://…/photo.jpg"
+        <div className="row gap-12" style={{ flexWrap: 'wrap', alignItems: 'flex-start' }}>
+          <label className="stack gap-4">
+            <span className="meta">Media</span>
+            <select
+              value={mediaType}
+              onChange={(e) => setMediaType(e.target.value as MediaType)}
               style={fieldStyle}
-            />
-            {imageUrl && (
-              // eslint-disable-next-line jsx-a11y/img-redundant-alt
-              <img
-                src={imageUrl}
-                alt="post image preview"
-                style={{ maxHeight: 120, borderRadius: 8, marginTop: 4, objectFit: 'cover' }}
-                onError={(e) => ((e.currentTarget.style.display = 'none'))}
-              />
-            )}
+            >
+              <option value="image">Image</option>
+              <option value="video">Video</option>
+              <option value="link">Link</option>
+            </select>
           </label>
+
+          {mediaType === 'image' && (
+            <>
+              <label className="stack gap-4" style={{ flex: 1, minWidth: 240 }}>
+                <span className="meta">Image brief (what the AI should generate)</span>
+                <textarea
+                  value={imagePrompt}
+                  onChange={(e) => setImagePrompt(e.target.value)}
+                  style={{ ...fieldStyle, minHeight: 60, resize: 'vertical' }}
+                />
+                <button
+                  className="btn ai sm"
+                  disabled={genBusy || !imagePrompt.trim()}
+                  onClick={generateImage}
+                  style={{ alignSelf: 'flex-start' }}
+                >
+                  <Icon name="sparkles" size={12} />{' '}
+                  {genBusy ? 'Generating…' : imageUrl ? 'Regenerate image' : 'Generate image'}
+                </button>
+                {genError && (
+                  <span className="meta" style={{ fontSize: 11, color: 'var(--danger, #c33)' }}>
+                    ⚠ {genError}
+                  </span>
+                )}
+              </label>
+              <label className="stack gap-4" style={{ flex: 1, minWidth: 240 }}>
+                <span className="meta">
+                  Image URL (public — required for Instagram; generate one or paste an asset URL)
+                </span>
+                <input
+                  value={imageUrl}
+                  onChange={(e) => setImageUrl(e.target.value)}
+                  placeholder="https://…/photo.jpg"
+                  style={fieldStyle}
+                />
+                {imageUrl && (
+                  <img
+                    src={imageUrl}
+                    alt="post preview"
+                    style={{ maxHeight: 120, borderRadius: 8, marginTop: 4, objectFit: 'cover' }}
+                    onError={(e) => ((e.currentTarget.style.display = 'none'))}
+                  />
+                )}
+              </label>
+            </>
+          )}
+
+          {mediaType === 'video' && (
+            <label className="stack gap-4" style={{ flex: 1, minWidth: 260 }}>
+              <span className="meta">
+                Video URL (public MP4/MOV — Facebook posts it directly; Instagram publishes it as a
+                Reel, ≤90s)
+              </span>
+              <input
+                value={videoUrl}
+                onChange={(e) => setVideoUrl(e.target.value)}
+                placeholder="https://…/clip.mp4"
+                style={fieldStyle}
+              />
+            </label>
+          )}
+
+          {mediaType === 'link' && (
+            <label className="stack gap-4" style={{ flex: 1, minWidth: 260 }}>
+              <span className="meta">
+                Link URL — posts to Facebook with a link preview. Instagram doesn't support link
+                posts (turn IG off for this one).
+              </span>
+              <input
+                value={linkUrl}
+                onChange={(e) => setLinkUrl(e.target.value)}
+                placeholder="https://yoursite.com/blog/that-post"
+                style={fieldStyle}
+              />
+            </label>
+          )}
         </div>
       </div>
 
@@ -902,9 +1061,19 @@ function PostEditor({
       {(post.status === 'approved' || post.status === 'failed' || post.status === 'published') && (
         <PublishNowPanel
           post={post}
-          igSelected={ig}
-          hasImage={!!imageUrl.trim()}
-          dirty={dirty}
+          blocker={
+            dirty
+              ? 'Save your changes first'
+              : mediaType === 'image' && ig && !imageUrl.trim()
+              ? 'Instagram is selected but this post has no image — generate or paste one'
+              : mediaType === 'video' && !videoUrl.trim()
+              ? 'This is a video post but it has no video URL'
+              : mediaType === 'link' && !linkUrl.trim()
+              ? 'This is a link post but it has no link URL'
+              : mediaType === 'link' && ig
+              ? "Instagram doesn't support link posts — turn IG off for this one"
+              : null
+          }
           onReload={onReload}
         />
       )}
@@ -916,22 +1085,18 @@ function PostEditor({
  * posts go LIVE (no paused state), so it's a confirm-then-send action. */
 function PublishNowPanel({
   post,
-  igSelected,
-  hasImage,
-  dirty,
+  blocker,
   onReload,
 }: {
   post: PostRow;
-  igSelected: boolean;
-  hasImage: boolean;
-  dirty: boolean;
+  /** Why publishing is currently blocked (unsaved edits, missing media…), or null. */
+  blocker: string | null;
   onReload: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
 
-  const igBlocked = igSelected && !hasImage;
   const carouselStory = post.format === 'carousel' || post.format === 'story';
 
   async function publish() {
@@ -1003,15 +1168,9 @@ function PublishNowPanel({
           {!confirming ? (
             <button
               className="btn primary"
-              disabled={publishing || igBlocked || dirty}
+              disabled={publishing || !!blocker}
               onClick={() => setConfirming(true)}
-              title={
-                dirty
-                  ? 'Save your changes first'
-                  : igBlocked
-                  ? 'Instagram is selected but this post has no image URL'
-                  : undefined
-              }
+              title={blocker ?? undefined}
             >
               <Icon name="bolt" size={12} /> Post now →
             </button>
@@ -1027,9 +1186,9 @@ function PublishNowPanel({
           )}
         </div>
       </div>
-      {dirty && (
+      {blocker && (
         <span className="meta" style={{ fontSize: 11 }}>
-          You have unsaved edits — save them before posting.
+          {blocker}
         </span>
       )}
       {result && (

@@ -1301,13 +1301,16 @@ const contentPlan: SpecBuilder = async (service, job) => {
   const wantFb = channels.length === 0 || channels.includes('facebook');
   const wantIg = channels.length === 0 || channels.includes('instagram');
 
-  const [clientCtx, locationCtx, skills, scraped] = await Promise.all([
+  const [clientCtx, locationCtx, skills, scraped, landing] = await Promise.all([
     loadBrandContext(service, job.client_id),
     input.location_id
       ? loadLocationContext(service, input.location_id as string)
       : Promise.resolve(null),
     loadSkills(service, job.workspace_id, 'content_plan'),
     scrapedContentSection(service, job.client_id, input.location_id as string | undefined),
+    // Optional URL to build the content around (a blog post, an offer
+    // page) — fetched live, same as the Ad Studio landing page.
+    landingPageSection(input.source_url as string | undefined),
   ]);
   const client = locationCtx ?? clientCtx;
   const parent = locationCtx ? clientCtx : null;
@@ -1337,6 +1340,7 @@ ${parent ? `\n## PARENT BRAND\n${formatClientContext(parent)}\n` : ''}
 ## OBJECTIVE FOR THIS CONTENT PLAN
 ${objective}
 ${input.additional_context ? `\n## EXTRA CONTEXT FROM THE USER\n${input.additional_context}\n` : ''}
+${landing ? `## SOURCE PAGE THE USER WANTS THE CONTENT BUILT AROUND (fetched from ${input.source_url})\n${landing}\n` : ''}
 ${scraped ? `## WEBSITE CONTENT (scraped — ground topics and claims in this)\n${scraped}\n` : ''}
 ## CHANNELS
 ${[wantFb ? 'Facebook' : null, wantIg ? 'Instagram' : null].filter(Boolean).join(' + ')}

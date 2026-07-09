@@ -153,7 +153,7 @@ Everything AI runs through one serverless pipeline:
 ### Secrets checklist (per environment)
 
 - Edge Function secrets: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
-  `RESEND_API_KEY`, `INTERNAL_FN_SECRET`.
+  `XAI_API_KEY` (image generation), `RESEND_API_KEY`, `INTERNAL_FN_SECRET`.
 - Vault secrets (for pg_cron): `canopy_functions_url`
   (`https://<ref>.supabase.co/functions/v1`) and
   `canopy_internal_fn_secret` (must equal `INTERNAL_FN_SECRET`).
@@ -240,8 +240,14 @@ check constraint). Deploy touches: `scrape-client`, `enqueue-job`, `run-job`,
 The live Content Calendar ([`LiveCalendar.tsx`](src/views/calendar/LiveCalendar.tsx),
 `/dev` keeps the wireframe) plans **organic** FB/IG posts on the same jobs
 pipeline as Ad Studio. A `content_plan` job takes a brief (objective,
-channels, date range, cadence 1–7 posts/week) and writes one `content_plans`
-row + one `content_posts` row per slot. Key decisions:
+channels, date range, cadence 1–7 posts/week, optional `source_url` — a
+blog/offer page fetched live via `landingPageSection` to build the content
+around) and writes one `content_plans` row + one `content_posts` row per
+slot. The view mounts twice: the top-level route (client picker defaults
+to **All clients** — every client's posts on one grid, chips/plans
+prefixed with client names, composer carries its own client select) and a
+**Calendar tab on ClientDetail** (`clientId` prop pins the client, renders
+embedded). Key decisions:
 
 - **Slot dates are computed in the builder** (`CADENCE_WEEKDAYS` in
   `taskSpecs.ts`), never by the LLM — the model fills exactly the provided
@@ -274,17 +280,35 @@ row + one `content_posts` row per slot. Key decisions:
   page id, draft) return 400 **before** any state change or audit row.
   Non-2xx from `functions.invoke` hides the real message — the panel
   unwraps `error.context` JSON to show it.
-- Each post carries an `image_prompt`; **image generation is a later phase**
-  but its provider config already exists: ai_settings task
-  `image_generation`, provider `xai` (the default, Settings → AI panel) or
-  `openai` — the migration extended the mode/primary_provider checks with
-  `'xai'`. Never hardcode an image model in function code.
+- **Image generation is live**: the editor's "Generate image" button calls
+  [`generate-post-image`](supabase/functions/generate-post-image/index.ts)
+  (a direct browser-invoked function, not a jobs-pipeline task — the
+  pipeline is one *chat* call per invocation and images are a different
+  shape). It reads the `image_generation` ai_settings row (provider `xai`
+  default / `openai`, free-text model, Settings → AI panel — never
+  hardcode a model), calls the provider, stores the PNG in the public
+  `client-assets` bucket under the post's client, and sets
+  `content_posts.image_url`. Secrets: `XAI_API_KEY` (add to the checklist)
+  / `OPENAI_API_KEY`.
+- **Media types**: `media_type` = `image` (default) / `video` / `link` with
+  `video_url` / `link_url` columns. Publishing branches per type — video:
+  FB `/{page}/videos` (file_url), IG as a **Reel** whose container
+  processes async (`waitForContainer` polls status, bounded 90s); link: FB
+  `/feed` with message+link, **Instagram has no link posts** (function
+  rejects, UI blocks with tooltip). Image-type IG still requires
+  `image_url`.
+- **Error surfacing**: `supabase.functions.invoke` hides a function's 400
+  message behind a generic "non-2xx" FunctionsHttpError — `enqueueJob`
+  (useJob.ts), the publish panel, and the generate-image button all unwrap
+  `error.context` JSON to show the real message. Do the same for any new
+  invoke() call.
 - Members edit posts directly from the browser (generations-style RLS);
   the job's finalize writes with the service role.
 
 Migrations: `20260709130000_content_plans.sql`,
-`20260709140000_post_publishes.sql`. Deploy touches: `enqueue-job`,
-`run-job`, `cron-dispatch` (shared `taskSpecs.ts`), `publish-meta-post`.
+`20260709140000_post_publishes.sql`, `20260710120000_post_media_types.sql`.
+Deploy touches: `enqueue-job`, `run-job`, `cron-dispatch` (shared
+`taskSpecs.ts`), `publish-meta-post`, `generate-post-image`.
 
 ## Asset library
 

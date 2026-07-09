@@ -9,6 +9,7 @@ import { useWorkspace } from '../../workspace/WorkspaceProvider';
 import { ClientFormModal } from '../ClientFormModal';
 import { AdAccountsTab } from './AdAccountsTab';
 import { AssetsTab } from './AssetsTab';
+import { LiveCalendar } from '../calendar/LiveCalendar';
 import { BrandTab } from './BrandTab';
 import { CompetitorsTab } from './CompetitorsTab';
 import { LocationsTab } from './LocationsTab';
@@ -19,12 +20,13 @@ type TabId =
   | 'overview'
   | 'brand'
   | 'assets'
+  | 'calendar'
   | 'scraped pages'
   | 'competitors'
   | 'ad accounts'
   | 'locations';
 
-const BASE_TABS: TabId[] = ['overview', 'brand', 'assets', 'scraped pages', 'competitors', 'ad accounts'];
+const BASE_TABS: TabId[] = ['overview', 'brand', 'calendar', 'assets', 'scraped pages', 'competitors', 'ad accounts'];
 
 export function ClientDetail() {
   const { state } = useAppState();
@@ -283,6 +285,8 @@ export function ClientDetail() {
         <OverviewTab clientId={header.id} />
       ) : tab === 'brand' ? (
         <BrandTab clientId={header.id} />
+      ) : tab === 'calendar' ? (
+        <LiveCalendar clientId={header.id} />
       ) : tab === 'assets' ? (
         <AssetsTab clientId={header.id} />
       ) : tab === 'scraped pages' ? (

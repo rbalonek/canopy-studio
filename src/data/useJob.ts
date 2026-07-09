@@ -36,7 +36,20 @@ export async function enqueueJob(args: {
       input: args.input ?? {},
     },
   });
-  if (error) throw new Error(error.message ?? 'Failed to enqueue job');
+  if (error) {
+    // A non-2xx makes invoke() throw a generic "non-2xx status code"
+    // FunctionsHttpError; the function's real message ("Unknown job type…",
+    // "Workspace access denied") is in the response body on error.context.
+    let text: string | null = null;
+    if ('context' in error) {
+      try {
+        text = (await (error.context as Response).json())?.error ?? null;
+      } catch {
+        /* body not JSON */
+      }
+    }
+    throw new Error(text ?? error.message ?? 'Failed to enqueue job');
+  }
   if (!data?.ok || !data?.job_id) throw new Error(data?.error ?? 'Failed to enqueue job');
   return data.job_id as string;
 }
