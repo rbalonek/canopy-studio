@@ -235,6 +235,38 @@ until bot-protection handling exists. Migration:
 check constraint). Deploy touches: `scrape-client`, `enqueue-job`, `run-job`,
 `cron-dispatch` (all import the shared `taskSpecs.ts`).
 
+## Content planner (Content Calendar)
+
+The live Content Calendar ([`LiveCalendar.tsx`](src/views/calendar/LiveCalendar.tsx),
+`/dev` keeps the wireframe) plans **organic** FB/IG posts on the same jobs
+pipeline as Ad Studio. A `content_plan` job takes a brief (objective,
+channels, date range, cadence 1–7 posts/week) and writes one `content_plans`
+row + one `content_posts` row per slot. Key decisions:
+
+- **Slot dates are computed in the builder** (`CADENCE_WEEKDAYS` in
+  `taskSpecs.ts`), never by the LLM — the model fills exactly the provided
+  slots and finalize drops any invented/duplicate dates. Capped at 31 slots
+  per job (`llmOptions.maxTokens` is raised to 16k for the big JSON).
+- **Per-platform captions** (`caption_fb` / `caption_ig`) per the Meta
+  publishing research below — FB and IG are separate API calls with
+  independent copy; the review step checks they aren't copies.
+- **`scheduled_date` (date) + `scheduled_time` (time) are separate columns**
+  on purpose: the calendar groups by civil date; composing a real timestamptz
+  with the client's timezone is the future publish phase's job.
+- Post status vocabulary already reserves the publish phase's states:
+  `draft → approved` are reachable today; `scheduled / published / failed`
+  arrive with the future `publish-meta-post` + pg_cron work.
+- Each post carries an `image_prompt`; **image generation is a later phase**
+  but its provider config already exists: ai_settings task
+  `image_generation`, provider `xai` (the default, Settings → AI panel) or
+  `openai` — the migration extended the mode/primary_provider checks with
+  `'xai'`. Never hardcode an image model in function code.
+- Members edit posts directly from the browser (generations-style RLS);
+  the job's finalize writes with the service role.
+
+Migration: `20260709130000_content_plans.sql`. Deploy touches:
+`enqueue-job`, `run-job`, `cron-dispatch` (shared `taskSpecs.ts`).
+
 ## Asset library
 
 Client uploads (logos / photos / videos / docs) live in a **public** Supabase

@@ -10,7 +10,14 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../../auth/supabaseClient';
 import { useWorkspace } from '../../workspace/WorkspaceProvider';
 import { useJobRunner } from '../../data/useJob';
-import { AI_TASKS, MODES, PROVIDERS, inputStyle } from './shared';
+import {
+  AI_TASKS,
+  DEFAULT_IMAGE_PROVIDER,
+  IMAGE_PROVIDERS,
+  MODES,
+  PROVIDERS,
+  inputStyle,
+} from './shared';
 
 type TaskSetting = {
   task: string;
@@ -243,7 +250,120 @@ export function AiSettingsTab() {
         )}
       </div>
 
+      <ImageGenPanel workspaceId={workspace.id} />
+
       <TestRunPanel workspaceId={workspace.id} />
+    </div>
+  );
+}
+
+/** Which provider/model generates images for planned content. Stored as
+ * the 'image_generation' ai_settings row (mode doubles as the provider id
+ * — single-provider, no collaboration for images). Defaults to xAI. */
+function ImageGenPanel({ workspaceId }: { workspaceId: string }) {
+  const [provider, setProvider] = useState<string>(DEFAULT_IMAGE_PROVIDER);
+  const [model, setModel] = useState('');
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!supabase) return;
+    let cancelled = false;
+    supabase
+      .from('ai_settings')
+      .select('primary_provider, primary_model')
+      .eq('workspace_id', workspaceId)
+      .eq('task', 'image_generation')
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelled) return;
+        if (data) {
+          setProvider((data.primary_provider as string) ?? DEFAULT_IMAGE_PROVIDER);
+          setModel((data.primary_model as string | null) ?? '');
+        }
+        setLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
+
+  async function save() {
+    if (!supabase) return;
+    setSaving(true);
+    setError(null);
+    const { error: err } = await supabase.from('ai_settings').upsert(
+      {
+        workspace_id: workspaceId,
+        task: 'image_generation',
+        mode: provider,
+        primary_provider: provider,
+        primary_model: model.trim() || null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'workspace_id,task' },
+    );
+    setSaving(false);
+    if (err) setError(err.message);
+  }
+
+  const meta = IMAGE_PROVIDERS.find((p) => p.id === provider);
+
+  return (
+    <div className="card">
+      <div className="card-pad stack gap-8">
+        <div className="row between">
+          <div className="stack gap-2">
+            <span className="h2">Image generation</span>
+            <span className="meta">
+              Which provider turns a planned post's image brief into the actual image. Any
+              provider can be plugged in here — model is free text so new IDs never need a
+              deploy.
+            </span>
+          </div>
+          <button className="btn sm" onClick={save} disabled={!loaded || saving}>
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+        <div className="row gap-8" style={{ flexWrap: 'wrap' }}>
+          <label className="stack gap-2">
+            <span className="meta" style={{ fontSize: 11 }}>
+              Provider
+            </span>
+            <select
+              value={provider}
+              onChange={(e) => setProvider(e.target.value)}
+              style={inputStyle}
+              disabled={!loaded}
+            >
+              {IMAGE_PROVIDERS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="stack gap-2">
+            <span className="meta" style={{ fontSize: 11 }}>
+              Model
+            </span>
+            <input
+              type="text"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder={meta?.modelPlaceholder ?? ''}
+              style={{ ...inputStyle, width: 200 }}
+              disabled={!loaded}
+            />
+          </label>
+        </div>
+        {error && (
+          <div className="meta" style={{ color: 'var(--danger, #c33)', fontSize: 11 }}>
+            ⚠ {error}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

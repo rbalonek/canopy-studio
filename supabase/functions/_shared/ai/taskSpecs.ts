@@ -1239,6 +1239,218 @@ Return valid JSON:
   };
 };
 
+// Which weekdays carry posts at each cadence (0=Sun … 6=Sat). Picked for
+// even spacing; the AI never does date math — slots are computed here and
+// the model fills them, so a 30-day plan can't drift or skip days.
+const CADENCE_WEEKDAYS: Record<number, number[]> = {
+  1: [3],
+  2: [2, 4],
+  3: [1, 3, 5],
+  4: [1, 2, 4, 5],
+  5: [1, 2, 3, 4, 5],
+  6: [1, 2, 3, 4, 5, 6],
+  7: [0, 1, 2, 3, 4, 5, 6],
+};
+
+const MAX_PLAN_SLOTS = 31; // one month at daily cadence per job
+
+const CONTENT_FORMATS = new Set(['post', 'reel', 'carousel', 'story']);
+const CONTENT_CHANNELS = ['facebook', 'instagram'];
+
+/** content_plan — a posting calendar for a date range: one content_posts
+ * row per slot with per-platform captions (FB and IG are separate Graph
+ * API calls with independent copy), a topic, a format, and an image
+ * prompt for the later image-generation step. Slot dates are computed
+ * here from the cadence; the LLM fills exactly those slots. finalize()
+ * writes the content_plans row + its content_posts. */
+const contentPlan: SpecBuilder = async (service, job) => {
+  if (!job.client_id) throw new Error('content_plan requires a client_id');
+  const input = job.input ?? {};
+
+  const objective = String(input.objective ?? '').trim();
+  if (!objective) throw new Error('content_plan requires input.objective');
+
+  const startStr = String(input.start_date ?? '');
+  const endStr = String(input.end_date ?? '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startStr) || !/^\d{4}-\d{2}-\d{2}$/.test(endStr)) {
+    throw new Error('content_plan requires start_date and end_date (YYYY-MM-DD)');
+  }
+  const start = new Date(`${startStr}T00:00:00Z`);
+  const end = new Date(`${endStr}T00:00:00Z`);
+  if (!(start <= end)) throw new Error('start_date must be on or before end_date');
+  if (end.getTime() - start.getTime() > 92 * 86_400_000) {
+    throw new Error('Plans are capped at ~3 months — pick a shorter range');
+  }
+
+  const perWeek = Math.min(Math.max(Number(input.posts_per_week) || 7, 1), 7);
+  const weekdays = new Set(CADENCE_WEEKDAYS[perWeek]);
+  const slots: string[] = [];
+  for (let t = start.getTime(); t <= end.getTime(); t += 86_400_000) {
+    const d = new Date(t);
+    if (weekdays.has(d.getUTCDay())) slots.push(d.toISOString().slice(0, 10));
+  }
+  const truncated = Math.max(0, slots.length - MAX_PLAN_SLOTS);
+  const slotDates = slots.slice(0, MAX_PLAN_SLOTS);
+  if (!slotDates.length) {
+    throw new Error('No posting slots in that range at this cadence — widen the range');
+  }
+
+  const channels = (Array.isArray(input.channels) ? input.channels : CONTENT_CHANNELS)
+    .map((c: unknown) => String(c))
+    .filter((c: string) => CONTENT_CHANNELS.includes(c));
+  const wantFb = channels.length === 0 || channels.includes('facebook');
+  const wantIg = channels.length === 0 || channels.includes('instagram');
+
+  const [clientCtx, locationCtx, skills, scraped] = await Promise.all([
+    loadBrandContext(service, job.client_id),
+    input.location_id
+      ? loadLocationContext(service, input.location_id as string)
+      : Promise.resolve(null),
+    loadSkills(service, job.workspace_id, 'content_plan'),
+    scrapedContentSection(service, job.client_id, input.location_id as string | undefined),
+  ]);
+  const client = locationCtx ?? clientCtx;
+  const parent = locationCtx ? clientCtx : null;
+
+  const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const slotList = slotDates
+    .map((d) => `${d} (${WEEKDAY_NAMES[new Date(`${d}T00:00:00Z`).getUTCDay()]})`)
+    .join('\n');
+
+  const captionRules = [
+    wantFb
+      ? '- "caption_facebook": conversational, link-friendly, no hashtag walls (0-2 hashtags max).'
+      : null,
+    wantIg
+      ? '- "caption_instagram": written for IG — hook in the first line, line breaks, and 3-8 relevant hashtags at the end. Must NOT be a copy of the Facebook caption.'
+      : null,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  return {
+    system:
+      'You are a senior social media strategist and copywriter creating organic Facebook/Instagram content calendars. Always respond with valid JSON.' +
+      skillsBlock(skills),
+    user: `${formatClientContext(client)}
+${parent ? `\n## PARENT BRAND\n${formatClientContext(parent)}\n` : ''}
+## OBJECTIVE FOR THIS CONTENT PLAN
+${objective}
+${input.additional_context ? `\n## EXTRA CONTEXT FROM THE USER\n${input.additional_context}\n` : ''}
+${scraped ? `## WEBSITE CONTENT (scraped — ground topics and claims in this)\n${scraped}\n` : ''}
+## CHANNELS
+${[wantFb ? 'Facebook' : null, wantIg ? 'Instagram' : null].filter(Boolean).join(' + ')}
+
+## POSTING SLOTS (fill EVERY slot with exactly ONE post — same date strings, no others)
+${slotList}
+
+## YOUR TASK
+Design a cohesive content calendar: a narrative arc across the whole range (not ${slotDates.length} disconnected posts). Vary the angle day to day — educational, social proof, behind-the-scenes, offer/CTA, seasonal — and vary formats ("post", "reel", "carousel"; use "story" sparingly if ever). Never invent facts, prices, or offers that aren't in the brand/website content above.
+
+For each slot also write "image_prompt": a concrete, self-contained brief for an AI image generator (subject, setting, mood, style — no brand-guideline jargon, no text overlays requested).
+
+Caption rules:
+${captionRules}
+
+Return valid JSON:
+{
+  "plan_title": "Short name for this plan",
+  "overview": "2-3 sentences on the arc of the calendar",
+  "themes": [ { "week": 1, "theme": "what that week focuses on" } ],
+  "posts": [
+    {
+      "date": "YYYY-MM-DD (one of the slots above)",
+      "format": "post" | "reel" | "carousel" | "story",
+      "topic": "one-line internal description of the post",
+      ${wantFb ? '"caption_facebook": "...",' : ''}
+      ${wantIg ? '"caption_instagram": "...",' : ''}
+      "image_prompt": "..."
+    }
+  ]
+}`,
+    reviewInstructions: `Check that there is EXACTLY one post per provided slot date (${slotDates.length} posts, no invented dates), captions are on-brand and grounded in the provided content (no invented facts/offers), ${
+      wantFb && wantIg
+        ? 'the Facebook and Instagram captions are genuinely different (not copies), '
+        : ''
+    }formats and angles vary across the calendar, and every image_prompt is concrete enough to generate from.`,
+    json: true,
+    llmOptions: { maxTokens: 16_000 },
+    finalize: async (result: any) => {
+      const slotSet = new Set(slotDates);
+      const seen = new Set<string>();
+      const rows: any[] = [];
+      for (const p of Array.isArray(result?.posts) ? result.posts : []) {
+        const date = String(p?.date ?? '');
+        if (!slotSet.has(date) || seen.has(date)) continue; // drop invented/duplicate dates
+        seen.add(date);
+        rows.push({
+          workspace_id: job.workspace_id,
+          client_id: job.client_id,
+          location_id: (input.location_id as string | undefined) ?? null,
+          scheduled_date: date,
+          scheduled_time: /^\d{2}:\d{2}$/.test(String(input.post_time ?? ''))
+            ? `${input.post_time}`
+            : '10:00',
+          channels: channels.length ? channels : CONTENT_CHANNELS,
+          format: CONTENT_FORMATS.has(String(p?.format)) ? String(p.format) : 'post',
+          topic: String(p?.topic ?? '').slice(0, 300),
+          caption_fb: wantFb && p?.caption_facebook ? String(p.caption_facebook) : null,
+          caption_ig: wantIg && p?.caption_instagram ? String(p.caption_instagram) : null,
+          image_prompt: p?.image_prompt ? String(p.image_prompt) : null,
+          status: 'draft',
+        });
+      }
+      if (!rows.length) throw new Error('The model returned no usable posts — try again');
+
+      const { data: plan, error: planErr } = await service
+        .from('content_plans')
+        .insert({
+          workspace_id: job.workspace_id,
+          client_id: job.client_id,
+          location_id: (input.location_id as string | undefined) ?? null,
+          title:
+            String(result?.plan_title ?? '').trim() ||
+            String(input.title ?? '').trim() ||
+            objective.slice(0, 80),
+          objective,
+          channels: channels.length ? channels : CONTENT_CHANNELS,
+          start_date: startStr,
+          end_date: endStr,
+          posts_per_week: perWeek,
+          summary: {
+            overview: result?.overview ?? null,
+            themes: Array.isArray(result?.themes) ? result.themes : [],
+          },
+          provider_meta: { job_id: job.id },
+          status: 'draft',
+        })
+        .select('id')
+        .single();
+      if (planErr || !plan) {
+        throw new Error(`Failed to save content plan: ${planErr?.message ?? 'no row'}`);
+      }
+
+      const { error: postsErr } = await service
+        .from('content_posts')
+        .insert(rows.map((r) => ({ ...r, plan_id: plan.id })));
+      if (postsErr) {
+        // Don't leave an empty plan behind.
+        await service.from('content_plans').delete().eq('id', plan.id);
+        throw new Error(`Failed to save posts: ${postsErr.message}`);
+      }
+
+      return {
+        plan_id: plan.id,
+        plan_title: result?.plan_title ?? null,
+        overview: result?.overview ?? null,
+        posts_created: rows.length,
+        slots_requested: slotDates.length,
+        slots_truncated: truncated,
+      };
+    },
+  };
+};
+
 /** test_prompt — Phase-0 plumbing check. Exercises the full pipeline
  * (settings lookup, skills injection, collaboration chaining, JSON
  * parsing, usage rows) with a trivial marketing prompt. */
@@ -1268,6 +1480,7 @@ const BUILDERS: Record<string, SpecBuilder> = {
   competitor_analysis: competitorAnalysis,
   account_analysis: accountAnalysis,
   send_report: sendReport,
+  content_plan: contentPlan,
 };
 
 export function getSpecBuilder(type: string): SpecBuilder | null {

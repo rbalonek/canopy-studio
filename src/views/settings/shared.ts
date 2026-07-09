@@ -59,6 +59,11 @@ export const AI_TASKS: Array<{ id: string; label: string; hint: string }> = [
     label: 'Report narratives',
     hint: 'The written summary in client reports',
   },
+  {
+    id: 'content_plan',
+    label: 'Content plans',
+    hint: 'Planning a calendar of social posts (topics, captions, image briefs)',
+  },
 ];
 
 export const PROVIDERS = [
@@ -71,3 +76,13 @@ export const MODES = [
   { id: 'openai', label: 'OpenAI only' },
   { id: 'collaboration', label: 'Collaboration (generate → review → refine)' },
 ] as const;
+
+/** Image generation is provider-pluggable like everything else — the
+ * choice is an ai_settings row (task 'image_generation'), never code.
+ * xAI is the default preset. */
+export const IMAGE_PROVIDERS = [
+  { id: 'xai', label: 'xAI (Grok)', modelPlaceholder: 'grok-2-image' },
+  { id: 'openai', label: 'OpenAI', modelPlaceholder: 'gpt-image-1' },
+] as const;
+
+export const DEFAULT_IMAGE_PROVIDER = 'xai';

@@ -85,7 +85,7 @@ export const ROUTES: RouteDef[] = [
   { id: 'client-ad-studio',   subpath: 'clients/:id/ad-studio',                  navTo: '', label: 'Ad Studio (client)',   icon: 'sparkles', section: 'workspace', hidden: true, ai: true },
   { id: 'location-ad-studio', subpath: 'clients/:id/locations/:locId/ad-studio', navTo: '', label: 'Ad Studio (location)', icon: 'sparkles', section: 'workspace', hidden: true, ai: true },
   { id: 'ad-perf',       subpath: 'ad-performance', label: 'Ad Performance',   icon: 'chart',    section: 'workspace', live: true },
-  { id: 'calendar',      subpath: 'calendar',      label: 'Content Calendar',  icon: 'calendar', section: 'workspace' },
+  { id: 'calendar',      subpath: 'calendar',      label: 'Content Calendar',  icon: 'calendar', section: 'workspace', ai: true, live: true },
   { id: 'ad-studio',     subpath: 'ad-studio',     label: 'Ad Studio',         icon: 'sparkles', section: 'workspace', ai: true, live: true },
   { id: 'brand',         subpath: 'brand',         label: 'Brand Intelligence', icon: 'brain',   section: 'workspace', live: true },
   { id: 'approvals',     subpath: 'approvals',     label: 'Approvals',         icon: 'check',    section: 'workspace' },
