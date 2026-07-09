@@ -253,9 +253,27 @@ row + one `content_posts` row per slot. Key decisions:
 - **`scheduled_date` (date) + `scheduled_time` (time) are separate columns**
   on purpose: the calendar groups by civil date; composing a real timestamptz
   with the client's timezone is the future publish phase's job.
-- Post status vocabulary already reserves the publish phase's states:
-  `draft → approved` are reachable today; `scheduled / published / failed`
-  arrive with the future `publish-meta-post` + pg_cron work.
+- Post status vocabulary: `draft → approved` via the editor;
+  `published / failed` are set by publishing. `scheduled` is reserved for
+  the future pg_cron auto-publish phase.
+- **Post now** (one-time instant publish): the editor's `PublishNowPanel`
+  calls the [`publish-meta-post`](supabase/functions/publish-meta-post/index.ts)
+  Edge Function — FB via a **Page token** (exchanged from the configured
+  token via `/{page_id}?fields=access_token`, System-User fallback) to
+  `/{page_id}/photos|feed`, IG via the two-step
+  `/{ig_user_id}/media → media_publish`. Organic posts have **no paused
+  state** — they go live immediately, so the function is gated to
+  `approved` posts, the UI is confirm-then-send, and the button disables
+  with unsaved edits or when IG is selected without an `image_url` (IG
+  requires an image; FB falls back to a text post). Targets resolve
+  location-first (`locations.page_id` / `instagram_business_account_id`),
+  then legacy `meta_accounts` — same token resolution as `publish-meta-ad`.
+  Audit trail in `post_publishes`; a partial result (FB ok, IG failed)
+  marks the post `failed` with an error naming what DID go out, so a retry
+  is a conscious choice, not a double-post. Guard failures (no token, no
+  page id, draft) return 400 **before** any state change or audit row.
+  Non-2xx from `functions.invoke` hides the real message — the panel
+  unwraps `error.context` JSON to show it.
 - Each post carries an `image_prompt`; **image generation is a later phase**
   but its provider config already exists: ai_settings task
   `image_generation`, provider `xai` (the default, Settings → AI panel) or
@@ -264,8 +282,9 @@ row + one `content_posts` row per slot. Key decisions:
 - Members edit posts directly from the browser (generations-style RLS);
   the job's finalize writes with the service role.
 
-Migration: `20260709130000_content_plans.sql`. Deploy touches:
-`enqueue-job`, `run-job`, `cron-dispatch` (shared `taskSpecs.ts`).
+Migrations: `20260709130000_content_plans.sql`,
+`20260709140000_post_publishes.sql`. Deploy touches: `enqueue-job`,
+`run-job`, `cron-dispatch` (shared `taskSpecs.ts`), `publish-meta-post`.
 
 ## Asset library
 

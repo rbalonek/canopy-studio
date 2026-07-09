@@ -57,6 +57,20 @@ disposable.
 
 ## Gotchas
 
+- `supabase status -o env` only works from the REPO dir — from anywhere
+  else it prints nothing and your `eval` silently sets no vars.
+- `docker exec … psql <<SQL` needs `-i` or the heredoc is silently
+  swallowed (psql "succeeds" having run nothing).
+- `UID` is a read-only zsh variable — don't use it for user ids.
+- To assert a function's error surfaced in the UI, wait for the ⚠/✓
+  RESULT line (`div.meta` starting with ⚠/✓), not panel copy that
+  contains similar words — screenshots taken on a loose match catch the
+  mid-flight "Posting…" state.
+- Direct-API probes of an Edge Function: get a JWT via
+  `POST $API_URL/auth/v1/token?grant_type=password` with the anon key,
+  then call `$API_URL/functions/v1/<fn>` with `Authorization: Bearer` +
+  `apikey` headers.
+
 - Settings tab labels are lowercase ids capitalized by CSS — locate
   `div.nav-item:has-text("ai")`, not `text=AI`.
 - `button:has-text("Approve")` also matches "Approve all" — use exact

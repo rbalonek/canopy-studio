@@ -695,6 +695,7 @@ export function LiveCalendar() {
           onPatch={(patch) => patchPost(selectedPost.id, patch)}
           onDelete={() => deletePost(selectedPost.id)}
           onClose={() => setSelectedId(null)}
+          onReload={() => setReloadTick((t) => t + 1)}
         />
       )}
     </div>
@@ -708,16 +709,19 @@ function PostEditor({
   onPatch,
   onDelete,
   onClose,
+  onReload,
 }: {
   post: PostRow;
   onPatch: (patch: Partial<PostRow>) => Promise<void>;
   onDelete: () => void;
   onClose: () => void;
+  onReload: () => void;
 }) {
   const [topic, setTopic] = useState(post.topic);
   const [captionFb, setCaptionFb] = useState(post.caption_fb ?? '');
   const [captionIg, setCaptionIg] = useState(post.caption_ig ?? '');
   const [imagePrompt, setImagePrompt] = useState(post.image_prompt ?? '');
+  const [imageUrl, setImageUrl] = useState(post.image_url ?? '');
   const [format, setFormat] = useState<PostFormat>(post.format);
   const [date, setDate] = useState(post.scheduled_date);
   const [time, setTime] = useState(post.scheduled_time.slice(0, 5));
@@ -730,6 +734,7 @@ function PostEditor({
     captionFb !== (post.caption_fb ?? '') ||
     captionIg !== (post.caption_ig ?? '') ||
     imagePrompt !== (post.image_prompt ?? '') ||
+    imageUrl !== (post.image_url ?? '') ||
     format !== post.format ||
     date !== post.scheduled_date ||
     time !== post.scheduled_time.slice(0, 5) ||
@@ -743,6 +748,7 @@ function PostEditor({
       caption_fb: fb ? captionFb || null : null,
       caption_ig: ig ? captionIg || null : null,
       image_prompt: imagePrompt || null,
+      image_url: imageUrl || null,
       format,
       scheduled_date: date,
       scheduled_time: time,
@@ -833,16 +839,38 @@ function PostEditor({
           )}
         </div>
 
-        <label className="stack gap-4">
-          <span className="meta">
-            Image brief (used by image generation — configure the provider in Settings → AI)
-          </span>
-          <textarea
-            value={imagePrompt}
-            onChange={(e) => setImagePrompt(e.target.value)}
-            style={{ ...fieldStyle, minHeight: 60, resize: 'vertical' }}
-          />
-        </label>
+        <div className="row gap-12" style={{ flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <label className="stack gap-4" style={{ flex: 1, minWidth: 260 }}>
+            <span className="meta">
+              Image brief (used by image generation — configure the provider in Settings → AI)
+            </span>
+            <textarea
+              value={imagePrompt}
+              onChange={(e) => setImagePrompt(e.target.value)}
+              style={{ ...fieldStyle, minHeight: 60, resize: 'vertical' }}
+            />
+          </label>
+          <label className="stack gap-4" style={{ flex: 1, minWidth: 260 }}>
+            <span className="meta">
+              Image URL (public — required to post to Instagram; paste one or an asset URL)
+            </span>
+            <input
+              value={imageUrl}
+              onChange={(e) => setImageUrl(e.target.value)}
+              placeholder="https://…/photo.jpg"
+              style={fieldStyle}
+            />
+            {imageUrl && (
+              // eslint-disable-next-line jsx-a11y/img-redundant-alt
+              <img
+                src={imageUrl}
+                alt="post image preview"
+                style={{ maxHeight: 120, borderRadius: 8, marginTop: 4, objectFit: 'cover' }}
+                onError={(e) => ((e.currentTarget.style.display = 'none'))}
+              />
+            )}
+          </label>
+        </div>
       </div>
 
       <div
@@ -861,7 +889,7 @@ function PostEditor({
               <Icon name="check" size={12} /> Approve
             </button>
           ) : (
-            post.status === 'approved' && (
+            (post.status === 'approved' || post.status === 'failed') && (
               <button className="btn" disabled={saving} onClick={() => save({ status: 'draft' })}>
                 Back to draft
               </button>
@@ -869,6 +897,150 @@ function PostEditor({
           )}
         </div>
       </div>
+
+      {/* ---- Publish now (organic, live) ---- */}
+      {(post.status === 'approved' || post.status === 'failed' || post.status === 'published') && (
+        <PublishNowPanel
+          post={post}
+          igSelected={ig}
+          hasImage={!!imageUrl.trim()}
+          dirty={dirty}
+          onReload={onReload}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Publish one approved post to Facebook/Instagram immediately. Organic
+ * posts go LIVE (no paused state), so it's a confirm-then-send action. */
+function PublishNowPanel({
+  post,
+  igSelected,
+  hasImage,
+  dirty,
+  onReload,
+}: {
+  post: PostRow;
+  igSelected: boolean;
+  hasImage: boolean;
+  dirty: boolean;
+  onReload: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const igBlocked = igSelected && !hasImage;
+  const carouselStory = post.format === 'carousel' || post.format === 'story';
+
+  async function publish() {
+    if (!supabase) return;
+    setPublishing(true);
+    setResult(null);
+    const { data, error } = await supabase.functions.invoke('publish-meta-post', {
+      body: { content_post_id: post.id },
+    });
+    setPublishing(false);
+    setConfirming(false);
+    if (error || !data?.ok) {
+      // A non-2xx makes invoke() throw a generic FunctionsHttpError; the
+      // function's real message ("No Meta access token configured…") is in
+      // the response body on error.context.
+      let text: string | null = (data?.error as string | undefined) ?? null;
+      if (!text && error && 'context' in error) {
+        try {
+          text = (await (error.context as Response).json())?.error ?? null;
+        } catch {
+          /* body not JSON — fall through to the generic message */
+        }
+      }
+      setResult({ ok: false, text: text ?? error?.message ?? 'Publish failed' });
+      onReload();
+      return;
+    }
+    const chans = (data.results ?? [])
+      .filter((r: { ok: boolean }) => r.ok)
+      .map((r: { channel: string }) => r.channel)
+      .join(' + ');
+    setResult({
+      ok: true,
+      text:
+        data.status === 'partial'
+          ? `Partially published (${chans}). ${data.error ?? ''}`
+          : `Published live to ${chans}.`,
+    });
+    onReload();
+  }
+
+  return (
+    <div className="card-pad stack gap-8" style={{ borderTop: '1px solid var(--border)' }}>
+      <div className="row between" style={{ gap: 12, flexWrap: 'wrap' }}>
+        <div className="stack gap-2" style={{ maxWidth: 520 }}>
+          <div className="row gap-8">
+            <Icon name="bolt" size={13} />
+            <span className="h2">Post now</span>
+            {post.status === 'published' && (
+              <span className="pill green" style={{ fontSize: 10 }}>
+                Published
+              </span>
+            )}
+          </div>
+          <span className="meta" style={{ fontSize: 11 }}>
+            Publishes this post to the selected channels{' '}
+            <strong>immediately and live</strong> — organic posts have no paused state. Uses the
+            client's Meta token, Facebook Page, and Instagram Business account (Ad Accounts tab).
+          </span>
+          {carouselStory && (
+            <span className="meta" style={{ fontSize: 11, color: 'var(--ai)' }}>
+              Note: {post.format} publishing needs the multi-image / stories flow — this button
+              posts a single image/text. Polls & link stickers on Stories must be added manually in
+              the app.
+            </span>
+          )}
+        </div>
+        <div className="row gap-8" style={{ alignItems: 'center' }}>
+          {!confirming ? (
+            <button
+              className="btn primary"
+              disabled={publishing || igBlocked || dirty}
+              onClick={() => setConfirming(true)}
+              title={
+                dirty
+                  ? 'Save your changes first'
+                  : igBlocked
+                  ? 'Instagram is selected but this post has no image URL'
+                  : undefined
+              }
+            >
+              <Icon name="bolt" size={12} /> Post now →
+            </button>
+          ) : (
+            <>
+              <button className="btn primary" disabled={publishing} onClick={publish}>
+                {publishing ? 'Posting…' : 'Confirm — publish live'}
+              </button>
+              <button className="btn ghost" disabled={publishing} onClick={() => setConfirming(false)}>
+                Cancel
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+      {dirty && (
+        <span className="meta" style={{ fontSize: 11 }}>
+          You have unsaved edits — save them before posting.
+        </span>
+      )}
+      {result && (
+        <div
+          className="meta"
+          style={{ fontSize: 12, color: result.ok ? 'var(--green)' : 'var(--danger, #c33)' }}
+        >
+          {result.ok ? '✓ ' : '⚠ '}
+          {result.text}
+        </div>
+      )}
     </div>
   );
 }
