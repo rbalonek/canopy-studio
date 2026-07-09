@@ -84,7 +84,235 @@ export function AdAccountsTab({ clientId }: { clientId: string }) {
         />
       )}
       {connection && !editing && <PullPastData clientId={clientId} />}
+      <MetaAppOverridePanel clientId={clientId} />
       <CampaignsTable clientId={clientId} />
+    </div>
+  );
+}
+
+type AppOverride = {
+  hasToken: boolean;
+  appId: string | null;
+  label: string | null;
+  updatedAt: string | null;
+};
+
+/**
+ * Per-client Meta app override. By default every client runs on the
+ * workspace master token (Settings → Connections); a client testing under
+ * a different Meta app (its own token, e.g. a dedicated posting app) gets
+ * that token stored here — the Edge Functions prefer it over the
+ * workspace token. Owner-only writes (RLS); token is write-only in the UI.
+ */
+function MetaAppOverridePanel({ clientId }: { clientId: string }) {
+  const [override, setOverride] = useState<AppOverride | null | undefined>(undefined);
+  const [editing, setEditing] = useState(false);
+  const [label, setLabel] = useState('');
+  const [appId, setAppId] = useState('');
+  const [token, setToken] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    if (!supabase) {
+      setOverride(null);
+      return;
+    }
+    const { data } = await supabase
+      .from('client_meta_credentials')
+      .select('access_token, app_id, label, updated_at')
+      .eq('client_id', clientId)
+      .maybeSingle();
+    if (!data) {
+      setOverride(null);
+      return;
+    }
+    setOverride({
+      hasToken: !!data.access_token,
+      appId: (data.app_id as string | null) ?? null,
+      label: (data.label as string | null) ?? null,
+      updatedAt: (data.updated_at as string | null) ?? null,
+    });
+  }, [clientId]);
+
+  useEffect(() => {
+    setOverride(undefined);
+    setEditing(false);
+    refresh();
+  }, [refresh]);
+
+  async function onSave(e: FormEvent) {
+    e.preventDefault();
+    if (!supabase) return;
+    if (!token.trim()) {
+      setErr('Paste the access token for this app.');
+      return;
+    }
+    setSaving(true);
+    setErr(null);
+    const { error } = await supabase.from('client_meta_credentials').upsert(
+      {
+        client_id: clientId,
+        access_token: token.trim(),
+        app_id: appId.trim() || null,
+        label: label.trim() || null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'client_id' },
+    );
+    setSaving(false);
+    if (error) {
+      // Most likely cause for a member: owner-only RLS.
+      setErr(
+        error.message.includes('row-level security')
+          ? 'Only the workspace owner can set a client token override.'
+          : error.message,
+      );
+      return;
+    }
+    setToken('');
+    setEditing(false);
+    refresh();
+  }
+
+  async function onRemove() {
+    if (!supabase) return;
+    if (
+      !confirm(
+        'Remove this client’s app override? It will go back to using the workspace master token.',
+      )
+    )
+      return;
+    const { error } = await supabase
+      .from('client_meta_credentials')
+      .delete()
+      .eq('client_id', clientId);
+    if (error) setErr(error.message);
+    refresh();
+  }
+
+  if (override === undefined) return null;
+
+  const showForm = editing || (!override && editing);
+
+  return (
+    <div className="card">
+      <div className="card-pad row between" style={{ borderBottom: showForm || override ? '1px solid var(--border)' : 0 }}>
+        <div className="stack gap-2">
+          <span style={{ fontWeight: 500 }}>Meta app override</span>
+          <span className="meta">
+            {override?.hasToken ? (
+              <>
+                This client uses its own app token
+                {override.label || override.appId ? (
+                  <>
+                    {' '}
+                    — <strong>{override.label ?? 'unnamed app'}</strong>
+                    {override.appId ? ` (${override.appId})` : ''}
+                  </>
+                ) : null}
+                . Refresh + publishing use it instead of the workspace token.
+              </>
+            ) : (
+              <>Using the workspace master token (default). Add an override to run this client under a different Meta app.</>
+            )}
+          </span>
+        </div>
+        <div className="row gap-8">
+          {override?.hasToken && !editing && (
+            <button className="btn ghost sm" onClick={onRemove}>
+              Remove
+            </button>
+          )}
+          {!editing && (
+            <button
+              className="btn sm"
+              onClick={() => {
+                setLabel(override?.label ?? '');
+                setAppId(override?.appId ?? '');
+                setToken('');
+                setErr(null);
+                setEditing(true);
+              }}
+            >
+              <Icon name="link" size={12} /> {override?.hasToken ? 'Update' : 'Add override'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {editing && (
+        <form onSubmit={onSave} className="card-pad stack gap-10">
+          <div className="row gap-12" style={{ flexWrap: 'wrap' }}>
+            <label className="stack gap-4" style={{ flex: 1, minWidth: 180 }}>
+              <span className="meta">App name (for your reference)</span>
+              <input
+                type="text"
+                className="input"
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+                placeholder="RDS - Posting App"
+                disabled={saving}
+              />
+            </label>
+            <label className="stack gap-4" style={{ flex: 1, minWidth: 180 }}>
+              <span className="meta">App ID (optional)</span>
+              <input
+                type="text"
+                className="input"
+                value={appId}
+                onChange={(e) => setAppId(e.target.value)}
+                placeholder="1830348180972716"
+                disabled={saving}
+              />
+            </label>
+          </div>
+          <label className="stack gap-4">
+            <span className="meta">Access token (write-only — never shown again)</span>
+            <input
+              type="password"
+              className="input"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              placeholder="EAAB…"
+              autoComplete="off"
+              disabled={saving}
+            />
+          </label>
+          {err && (
+            <div className="meta" style={{ color: 'var(--danger, #c33)', fontSize: 12 }}>
+              ⚠ {err}
+            </div>
+          )}
+          <div className="row gap-8">
+            <button type="submit" className="btn primary sm" disabled={saving}>
+              {saving ? 'Saving…' : 'Save override'}
+            </button>
+            <button
+              type="button"
+              className="btn ghost sm"
+              disabled={saving}
+              onClick={() => setEditing(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
+      {!editing && override?.hasToken && (
+        <div className="card-pad meta" style={{ fontSize: 11 }}>
+          Token stored (••••••••) · last updated{' '}
+          {override.updatedAt
+            ? new Date(override.updatedAt).toLocaleString(undefined, {
+                month: 'short',
+                day: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+              })
+            : '—'}
+        </div>
+      )}
     </div>
   );
 }

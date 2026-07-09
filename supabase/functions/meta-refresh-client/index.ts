@@ -231,6 +231,15 @@ async function resolveAccessToken(
   workspaceId: string,
   clientId: string,
 ): Promise<string | null> {
+  // A per-client app override (e.g. a client testing under a different
+  // Meta app) beats the workspace master token.
+  const { data: clientCreds } = await service
+    .from('client_meta_credentials')
+    .select('access_token')
+    .eq('client_id', clientId)
+    .maybeSingle();
+  if (clientCreds?.access_token) return clientCreds.access_token as string;
+
   const { data: ws } = await service
     .from('workspace_meta_credentials')
     .select('access_token')
