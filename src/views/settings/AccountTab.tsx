@@ -5,12 +5,14 @@ import { useAppState, type Density, type Theme } from '../../shell/AppState';
 import { inputStyle } from './shared';
 
 /** Account settings: display name (auth user_metadata + profiles row, the
- * sources the Sidebar/Overview greeting read), password change, and the
- * instant local appearance toggles (theme / density). Email is shown
+ * sources the Sidebar/Overview greeting read), password change, the
+ * instant local appearance toggles (theme / density), and sign out (also
+ * in the sidebar footer, but this is the discoverable one). Email is shown
  * read-only — changing it needs a confirmation round-trip we haven't built. */
 export function AccountTab() {
   const auth = useAuth();
   const { state, set } = useAppState();
+  const [signingOut, setSigningOut] = useState(false);
 
   const currentName =
     (typeof auth.user?.user_metadata?.display_name === 'string'
@@ -184,6 +186,26 @@ export function AccountTab() {
         <span className="meta" style={{ fontSize: 11 }}>
           Saved on this device (applies immediately).
         </span>
+      </div>
+
+      <div className="card card-pad row between" style={{ gap: 12, flexWrap: 'wrap' }}>
+        <div className="stack gap-2">
+          <span className="h2">Session</span>
+          <span className="meta" style={{ fontSize: 11 }}>
+            Signed in as {auth.user?.email ?? 'unknown'}. Signing out returns you to the login
+            screen — nothing else changes.
+          </span>
+        </div>
+        <button
+          className="btn"
+          disabled={signingOut}
+          onClick={async () => {
+            setSigningOut(true);
+            await auth.signOut();
+          }}
+        >
+          {signingOut ? 'Signing out…' : 'Sign out'}
+        </button>
       </div>
     </div>
   );
