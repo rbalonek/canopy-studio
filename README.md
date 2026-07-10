@@ -97,7 +97,8 @@ See [`.env.example`](.env.example). Notable:
 │   ├── routes.ts                ← prefix-agnostic route table + sidebar metadata
 │   ├── shell/                   ← AppShell, Sidebar, Topbar, AppState
 │   ├── data/                    ← types, mock, provider interface, providers
-│   ├── components/              ← shared primitives (Icon, KPI, AdThumb, …)
+│   ├── components/              ← shared primitives (Icon, KPI, MetricPicker, …)
+│   ├── lib/                     ← framework-free helpers (metaMetrics: metric catalog)
 │   └── views/                   ← one file per route (sub-folders for tabbed views)
 ├── supabase/
 │   ├── config.toml              ← local stack config
@@ -108,21 +109,72 @@ See [`.env.example`](.env.example). Notable:
                                    overwritten by Claude Design itself.
 ```
 
-## Meta publishing roadmap
+## Website scraper
 
-Four publishing features confirmed viable against the Meta Graph API. To be
-built after the live-flow steps (auth, workspaces, `/app/*` guard, Meta token
-UI) are complete. Full implementation notes are in `CLAUDE.md`.
+The `scrape-client` Edge Function crawls a client's site (and competitor sites)
+and stores the extracted page text in the `scraped_pages` table. That content is
+kept and reused — it grounds the AI brand profile, ad copy, and competitor
+analysis; the site isn't re-fetched every time. Managed from a client's **Scraped
+Pages** tab:
+
+- **Re-scrape** — full re-crawl from the saved website URL (discovers the
+  sitemap, ranks pages, fetches the top ~8). Non-destructive: a failed run never
+  wipes existing pages.
+- **Add pages** — paste one or more URLs/paths to scrape just those, leaving
+  existing pages untouched (no re-crawl).
+- **Exclude** — per-page dropdown: *Active*, *Skip re-scrape* (keep the last
+  content for the AI), or *Skip re-scrape + content* (also hide it from the AI).
+- **Edit words** — click a page's word count to open its extracted text; edits
+  are saved and preserved across future re-scrapes.
+
+A client's analyzed logo (detected during scraping, stored on `brand_profiles`)
+is shown in place of the initials avatar across the client grid, tables, headers,
+and its location cards — falling back to initials when there's no logo.
+
+## Asset library
+
+A client's **Assets** tab is a real upload-backed library: drop in logos, photos,
+videos, or brand docs and they're stored in a public Supabase Storage bucket
+(`client-assets`) with a metadata row per file. Uploads, thumbnails, and delete
+all work from the browser. **Set as client logo** on any image makes it the
+client's brand logo (shown app-wide, and protected from being overwritten by a
+future website analysis). `/dev` keeps the wireframe on mock data.
+
+## Organic posting & scheduling — LIVE ✅
+
+CanopyStudio officially posts and schedules organic content to Facebook and
+Instagram. The Content Calendar (top-level "All clients" view + a Calendar
+tab on every client) covers the full loop:
+
+- **Plan** — a `content_plan` AI job drafts a whole calendar from a brief
+  (objective, channels, date range, cadence, optional source URL to build
+  around), grounded in the client's brand profile + scraped site.
+- **Per-platform captions** — separate FB and IG copy per post (they're
+  independent API calls; IG gets hooks + hashtags, FB stays link-friendly).
+- **Imagery** — per-post image briefs; "Generate image" renders them via
+  the configured provider (xAI Grok by default, OpenAI selectable —
+  Settings → AI). Image / video / link media types per post.
+- **Post now** — instant live publish to the selected channels, gated to
+  approved posts behind a confirm.
+- **Schedule** — Facebook posts are scheduled *natively in Meta* (they
+  appear in the Page's Content Library → Scheduled and Meta publishes
+  them); Instagram has no API scheduling (a platform limitation for all
+  tools), so a 5-minute cron publishes IG at the scheduled time. Cancel
+  un-schedules both sides.
+
+Needs per environment: a Meta token + Page ID (+ IG Business account id
+for Instagram) on the client, `XAI_API_KEY` for image generation, and the
+two Vault secrets for the cron (see `CLAUDE.md` → secrets checklist).
+External client accounts still require Meta App Review
+(`pages_manage_posts`, `instagram_business_content_publish`).
+
+### Still roadmap
 
 | Feature | Status | Key caveat |
 |---|---|---|
-| Per-platform captions (separate FB / IG text + tags) | Planned | Two caption fields needed in the post composer; separate API calls by design |
 | Auto-publish to Stories (no phone tap required) | Planned | Interactive stickers (polls, link stickers) cannot be added via API — must be added manually in-app after publish |
 | Location tagging via Meta's place search | Planned | Always show the user the exact Meta-canonical place name before confirming — it may differ from what they typed. Not available on carousel posts. |
 | Multi-image carousel upload (up to 10 images) | Planned | Single multi-file picker in UI; N+1 API calls happen server-side. Location tags not supported on carousels. |
-
-All four require Meta App Review (Advanced Access) before the app can serve
-external clients — plan for a 2–4 week review window.
 
 ## Common tasks
 
@@ -139,3 +191,12 @@ migration, add the seed insert, and override the method in
 **Switch the app between local & hosted Supabase** — edit two lines in
 `.env.local` (`VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`),
 restart the dev server.
+
+**Add a Meta metric** — add a `MetricDef` to `METRICS` in
+[`src/lib/metaMetrics.ts`](src/lib/metaMetrics.ts). The campaigns table, the
+client Overview, and the metric picker all pick it up automatically. Values
+come from the period-aware `Norm` (built from `campaigns.metrics_by_period` —
+this month / last month / last 30 days — plus the full Meta action map). Every
+action type present in the data is already auto-discovered as a selectable
+metric, so you only add a `MetricDef` for a *derived* metric (a ratio,
+cost-per, or a friendly-named rollup). See CLAUDE.md → *Meta refresh & metrics*.

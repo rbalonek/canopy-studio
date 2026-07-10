@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../../auth/supabaseClient';
 import { Icon } from '../../components/Icon';
+import { enqueueJob } from '../../data/useJob';
+import { useWorkspace } from '../../workspace/WorkspaceProvider';
 
 type DomainRow = {
   id: string;
@@ -10,7 +12,17 @@ type DomainRow = {
   pages_discovered: number;
   pages_indexed: number;
   last_crawled_at: string | null;
+  /** Full discovery set from the last full scrape (capped at 300). Powers
+   * the "pick from discovered pages" list in the Add-pages panel. Null on
+   * domains whose last scrape predates the recording feature. */
+  discovered_urls: string[] | null;
 };
+
+/** Page exclusion state. Mirrors scraped_pages.excluded:
+ *  none   — active (re-scraped + fed to the AI)
+ *  scrape — skip re-scraping, keep last content for the AI
+ *  all    — skip re-scraping AND withhold content from the AI */
+type Excluded = 'none' | 'scrape' | 'all';
 
 type PageRow = {
   id: string;
@@ -19,6 +31,8 @@ type PageRow = {
   word_count: number | null;
   status: 'analyzed' | 'pending' | 'failed';
   scraped_at: string;
+  excluded: Excluded;
+  content_edited: boolean;
 };
 
 const HEALTH_PILL: Record<DomainRow['health'], string> = {
@@ -28,11 +42,25 @@ const HEALTH_PILL: Record<DomainRow['health'], string> = {
   Error: 'red',
 };
 
+const EXCLUDE_LABEL: Record<Excluded, string> = {
+  none: 'Active',
+  scrape: 'Skip re-scrape',
+  all: 'Skip re-scrape + content',
+};
+
 export function ScrapedPagesTab({ clientId }: { clientId: string }) {
+  const workspace = useWorkspace();
   const [domains, setDomains] = useState<DomainRow[] | null>(null);
   const [pages, setPages] = useState<PageRow[] | null>(null);
   const [website, setWebsite] = useState<string | null>(null);
   const [scraping, setScraping] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [addUrls, setAddUrls] = useState('');
+  const [showAdd, setShowAdd] = useState(false);
+  // Checked entries in the discovered-pages picker + its filter text.
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [pickFilter, setPickFilter] = useState('');
+  const [editor, setEditor] = useState<PageRow | null>(null);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
   const refresh = useCallback(async () => {
@@ -46,14 +74,16 @@ export function ScrapedPagesTab({ clientId }: { clientId: string }) {
       supabase
         .from('scraped_domains')
         .select(
-          'id, domain, health, sitemap_status, pages_discovered, pages_indexed, last_crawled_at',
+          'id, domain, health, sitemap_status, pages_discovered, pages_indexed, last_crawled_at, discovered_urls',
         )
         .eq('client_id', clientId)
+        .is('competitor_id', null)
         .order('last_crawled_at', { ascending: false }),
       supabase
         .from('scraped_pages')
-        .select('id, url, title, word_count, status, scraped_at')
+        .select('id, url, title, word_count, status, scraped_at, excluded, content_edited')
         .eq('client_id', clientId)
+        .is('competitor_id', null)
         .order('scraped_at', { ascending: false }),
     ]);
     setWebsite((cRes.data?.website as string | null) ?? null);
@@ -64,6 +94,34 @@ export function ScrapedPagesTab({ clientId }: { clientId: string }) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Re-run the brand profile from the freshly scraped content (best-effort;
+  // fields the user has edited are never overwritten).
+  const reanalyze = useCallback(
+    (url: string) => {
+      if (!workspace) return;
+      enqueueJob({
+        type: 'website_analysis',
+        workspaceId: workspace.id,
+        clientId,
+        input: { url },
+      }).catch((e) => console.warn('Brand analysis enqueue failed:', e));
+    },
+    [workspace, clientId],
+  );
+
+  // Scan the freshly recorded nav links / discovered URLs for per-location
+  // pages (best-effort — new finds appear in the Locations tab). Discovery
+  // scrapes only: add-mode doesn't refresh the detection material.
+  const detectLocations = useCallback(() => {
+    if (!workspace) return;
+    enqueueJob({
+      type: 'location_detection',
+      workspaceId: workspace.id,
+      clientId,
+      input: {},
+    }).catch((e) => console.warn('Location detection enqueue failed:', e));
+  }, [workspace, clientId]);
 
   async function onScrape(url: string) {
     if (!supabase || !url) return;
@@ -83,10 +141,98 @@ export function ScrapedPagesTab({ clientId }: { clientId: string }) {
     }
     setMsg({
       kind: 'ok',
-      text: `Scraped ${data.pages_scraped} of ${data.pages_discovered} discovered pages.`,
+      text: `Scraped ${data.pages_scraped} of ${data.pages_discovered} discovered pages. Updating the brand profile…`,
     });
+    reanalyze(url);
+    detectLocations();
     refresh();
   }
+
+  // Add-mode: scrape only the URLs the user pasted and/or checked in the
+  // discovered-pages picker, leaving existing pages untouched. Accepts
+  // newline / comma / space separated URLs or paths.
+  async function onAddPages() {
+    if (!supabase) return;
+    const seed = website ?? domains?.[0]?.domain ?? '';
+    const base = seed ? (seed.startsWith('http') ? seed : `https://${seed}`) : '';
+    const typed = addUrls
+      .split(/[\s,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((s) => {
+        if (/^https?:\/\//i.test(s)) return s;
+        if (base) {
+          try {
+            return new URL(s.startsWith('/') ? s : `/${s}`, base).toString();
+          } catch {
+            return s;
+          }
+        }
+        return `https://${s}`;
+      });
+    const urls = Array.from(new Set([...typed, ...picked]));
+    if (urls.length === 0) {
+      setMsg({ kind: 'err', text: 'Enter or pick one or more page URLs to add.' });
+      return;
+    }
+    // Each page is a live fetch inside one function invocation (~10s timeout
+    // apiece within a ~150s budget) — keep a batch comfortably under that.
+    if (urls.length > 20) {
+      setMsg({ kind: 'err', text: `That's ${urls.length} pages — add at most 20 per batch.` });
+      return;
+    }
+    setAdding(true);
+    setMsg(null);
+    const { data, error } = await supabase.functions.invoke('scrape-client', {
+      body: { client_id: clientId, url: base || urls[0], urls },
+    });
+    setAdding(false);
+    if (error) {
+      setMsg({ kind: 'err', text: error.message });
+      return;
+    }
+    if (!data?.ok) {
+      setMsg({ kind: 'err', text: data?.error ?? 'None of those pages could be scraped' });
+      return;
+    }
+    setMsg({
+      kind: 'ok',
+      text: `Added ${data.pages_scraped} page${data.pages_scraped === 1 ? '' : 's'}. Updating the brand profile…`,
+    });
+    setAddUrls('');
+    setPicked(new Set());
+    setShowAdd(false);
+    reanalyze(base || urls[0]);
+    refresh();
+  }
+
+  async function setExclusion(page: PageRow, mode: Excluded) {
+    if (!supabase) return;
+    // Optimistic — the RPC only touches this row's `excluded`.
+    setPages((prev) =>
+      (prev ?? []).map((p) => (p.id === page.id ? { ...p, excluded: mode } : p)),
+    );
+    const { error } = await supabase.rpc('set_scraped_page_exclusion', {
+      p_page_id: page.id,
+      p_mode: mode,
+    });
+    if (error) {
+      setMsg({ kind: 'err', text: error.message });
+      refresh();
+    }
+  }
+
+  // Discovered-but-unscraped pages for the picker. Recorded by full scrapes
+  // since the detection feature; older domains just have no list to offer.
+  const indexedUrls = new Set((pages ?? []).map((p) => normUrl(p.url)));
+  const discoveredAvailable = Array.from(
+    new Set((domains ?? []).flatMap((d) => d.discovered_urls ?? [])),
+  ).filter((u) => !indexedUrls.has(normUrl(u)));
+  const filteredDiscovered = pickFilter.trim()
+    ? discoveredAvailable.filter((u) =>
+        u.toLowerCase().includes(pickFilter.trim().toLowerCase()),
+      )
+    : discoveredAvailable;
 
   if (domains === null || pages === null) {
     return <div className="meta">Loading…</div>;
@@ -121,18 +267,7 @@ export function ScrapedPagesTab({ clientId }: { clientId: string }) {
             {scraping ? 'Scraping…' : 'Scrape now'}
           </button>
         )}
-        {msg && (
-          <div
-            className="meta"
-            style={{
-              color: msg.kind === 'err' ? 'var(--danger, #c33)' : 'var(--accent)',
-              fontSize: 12,
-            }}
-          >
-            {msg.kind === 'err' ? '⚠ ' : '✓ '}
-            {msg.text}
-          </div>
-        )}
+        {msg && <Banner msg={msg} />}
       </div>
     );
   }
@@ -148,10 +283,17 @@ export function ScrapedPagesTab({ clientId }: { clientId: string }) {
           ))}
         </div>
         <div className="row gap-8">
+          <button
+            className="btn ghost"
+            disabled={scraping || adding}
+            onClick={() => setShowAdd((s) => !s)}
+          >
+            <Icon name="plus" size={13} /> Add pages
+          </button>
           {website && (
             <button
               className="btn ghost"
-              disabled={scraping}
+              disabled={scraping || adding}
               onClick={() => onScrape(website)}
             >
               <Icon name="refresh" size={13} /> {scraping ? 'Re-scraping…' : 'Re-scrape'}
@@ -159,18 +301,92 @@ export function ScrapedPagesTab({ clientId }: { clientId: string }) {
           )}
         </div>
       </div>
-      {msg && (
-        <div
-          className="meta"
-          style={{
-            color: msg.kind === 'err' ? 'var(--danger, #c33)' : 'var(--accent)',
-            fontSize: 12,
-          }}
-        >
-          {msg.kind === 'err' ? '⚠ ' : '✓ '}
-          {msg.text}
+
+      {showAdd && (
+        <div className="card card-pad stack gap-8">
+          <div style={{ fontWeight: 500 }}>Add individual pages</div>
+          <div className="meta">
+            Paste one or more page URLs (or paths like <code>/pricing</code>), separated by
+            new lines, commas, or spaces. Only these pages are scraped — your existing pages
+            are left untouched.
+          </div>
+          <textarea
+            className="input"
+            rows={3}
+            placeholder={'/pricing\n/faq\nhttps://example.com/team'}
+            value={addUrls}
+            onChange={(e) => setAddUrls(e.target.value)}
+            style={{ resize: 'vertical', fontFamily: 'var(--mono, monospace)', fontSize: 12 }}
+          />
+          {discoveredAvailable.length > 0 && (
+            <div className="stack gap-6">
+              <div className="meta">
+                Or pick from the pages the last scrape discovered but didn't index (
+                {discoveredAvailable.length} available, up to 20 per batch):
+              </div>
+              <input
+                className="input"
+                type="text"
+                placeholder="Filter paths… e.g. birthday"
+                value={pickFilter}
+                onChange={(e) => setPickFilter(e.target.value)}
+                style={{ fontSize: 12 }}
+              />
+              <div
+                className="stack gap-2"
+                style={{
+                  maxHeight: 220,
+                  overflowY: 'auto',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  padding: 8,
+                }}
+              >
+                {filteredDiscovered.length === 0 ? (
+                  <span className="meta">No discovered pages match that filter.</span>
+                ) : (
+                  filteredDiscovered.map((u) => (
+                    <label
+                      key={u}
+                      className="row gap-6"
+                      style={{ alignItems: 'center', cursor: 'pointer' }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={picked.has(u)}
+                        disabled={adding}
+                        onChange={(e) => {
+                          setPicked((prev) => {
+                            const next = new Set(prev);
+                            if (e.target.checked) next.add(u);
+                            else next.delete(u);
+                            return next;
+                          });
+                        }}
+                      />
+                      <span className="mono" style={{ fontSize: 11 }}>
+                        {safePath(u)}
+                      </span>
+                    </label>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+          <div className="row gap-8">
+            <button className="btn primary" disabled={adding} onClick={onAddPages}>
+              {adding
+                ? 'Adding…'
+                : `Add pages${picked.size ? ` (${picked.size} picked)` : ''}`}
+            </button>
+            <button className="btn ghost" disabled={adding} onClick={() => setShowAdd(false)}>
+              Cancel
+            </button>
+          </div>
         </div>
       )}
+
+      {msg && <Banner msg={msg} />}
 
       {domains.map((d) => {
         const rows = pages.filter((p) => safeHost(p.url) === d.domain);
@@ -207,25 +423,41 @@ export function ScrapedPagesTab({ clientId }: { clientId: string }) {
                   <th>Title</th>
                   <th style={{ textAlign: 'right' }}>Words</th>
                   <th>Last scraped</th>
+                  <th>Status</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
                 {rows.length === 0 ? (
                   <tr>
-                    <td colSpan={5} style={{ padding: 16, color: 'var(--fg-3)' }}>
+                    <td colSpan={6} style={{ padding: 16, color: 'var(--fg-3)' }}>
                       No pages indexed for this domain yet.
                     </td>
                   </tr>
                 ) : (
                   rows.map((r) => (
-                    <tr key={r.id}>
+                    <tr key={r.id} style={{ opacity: r.excluded === 'all' ? 0.5 : 1 }}>
                       <td className="mono" style={{ fontSize: 12 }}>
                         {safePath(r.url)}
                       </td>
                       <td>{r.title ?? '—'}</td>
                       <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                        {r.word_count?.toLocaleString() ?? '—'}
+                        <button
+                          className="btn ghost sm"
+                          title="View / edit the extracted text for this page"
+                          onClick={() => setEditor(r)}
+                          style={{ fontVariantNumeric: 'tabular-nums' }}
+                        >
+                          {r.word_count?.toLocaleString() ?? '—'}
+                          {r.content_edited && (
+                            <span
+                              title="Hand-edited — preserved on re-scrape"
+                              style={{ marginLeft: 4, color: 'var(--accent)' }}
+                            >
+                              ✎
+                            </span>
+                          )}
+                        </button>
                       </td>
                       <td className="meta">
                         {new Date(r.scraped_at).toLocaleString(undefined, {
@@ -234,6 +466,21 @@ export function ScrapedPagesTab({ clientId }: { clientId: string }) {
                           hour: 'numeric',
                           minute: '2-digit',
                         })}
+                      </td>
+                      <td>
+                        <select
+                          className="input"
+                          value={r.excluded}
+                          title="Include this page in re-scrapes and AI analysis, or exclude it"
+                          onChange={(e) => setExclusion(r, e.target.value as Excluded)}
+                          style={{ fontSize: 12, padding: '2px 4px' }}
+                        >
+                          {(Object.keys(EXCLUDE_LABEL) as Excluded[]).map((k) => (
+                            <option key={k} value={k}>
+                              {EXCLUDE_LABEL[k]}
+                            </option>
+                          ))}
+                        </select>
                       </td>
                       <td>
                         <a
@@ -254,6 +501,161 @@ export function ScrapedPagesTab({ clientId }: { clientId: string }) {
           </div>
         );
       })}
+
+      {editor && (
+        <ContentEditor
+          page={editor}
+          onClose={() => setEditor(null)}
+          onSaved={() => {
+            setEditor(null);
+            refresh();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function Banner({ msg }: { msg: { kind: 'ok' | 'err'; text: string } }) {
+  return (
+    <div
+      className="meta"
+      style={{
+        color: msg.kind === 'err' ? 'var(--danger, #c33)' : 'var(--accent)',
+        fontSize: 12,
+      }}
+    >
+      {msg.kind === 'err' ? '⚠ ' : '✓ '}
+      {msg.text}
+    </div>
+  );
+}
+
+/** Modal editor over a page's extracted text. Loads the current content on
+ * open and saves via the membership-checked set_scraped_page_content RPC,
+ * which recomputes word_count and flags the row so re-scrapes preserve it. */
+function ContentEditor({
+  page,
+  onClose,
+  onSaved,
+}: {
+  page: PageRow;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [text, setText] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!supabase) {
+        setText('');
+        return;
+      }
+      const { data, error } = await supabase
+        .from('scraped_pages')
+        .select('content')
+        .eq('id', page.id)
+        .maybeSingle();
+      if (cancelled) return;
+      if (error) setErr(error.message);
+      setText((data?.content as string | null) ?? '');
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [page.id]);
+
+  async function save() {
+    if (!supabase || text === null) return;
+    setSaving(true);
+    setErr(null);
+    const { error } = await supabase.rpc('set_scraped_page_content', {
+      p_page_id: page.id,
+      p_content: text,
+    });
+    setSaving(false);
+    if (error) {
+      setErr(error.message);
+      return;
+    }
+    onSaved();
+  }
+
+  const wordCount = (text ?? '').trim() ? (text ?? '').trim().split(/\s+/).length : 0;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.4)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 50,
+        padding: 24,
+      }}
+    >
+      <div
+        className="card card-pad stack gap-12"
+        onClick={(e) => e.stopPropagation()}
+        style={{ width: 'min(760px, 100%)', maxHeight: '85vh' }}
+      >
+        <div className="row between">
+          <div className="stack" style={{ gap: 2 }}>
+            <div style={{ fontWeight: 600 }}>{page.title ?? safePath(page.url)}</div>
+            <div className="meta mono" style={{ fontSize: 12 }}>
+              {safePath(page.url)}
+            </div>
+          </div>
+          <button className="btn ghost sm" onClick={onClose}>
+            <Icon name="close" size={14} />
+          </button>
+        </div>
+        <div className="meta">
+          Extracted text used to brief the AI. Edit to correct or add wording for this page —
+          your edit is preserved on future re-scrapes.
+        </div>
+        {text === null ? (
+          <div className="meta">Loading content…</div>
+        ) : (
+          <textarea
+            className="input"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            style={{
+              width: '100%',
+              minHeight: 320,
+              maxHeight: '55vh',
+              resize: 'vertical',
+              fontSize: 13,
+              lineHeight: 1.5,
+            }}
+          />
+        )}
+        {err && <Banner msg={{ kind: 'err', text: err }} />}
+        <div className="row between">
+          <span className="meta">{wordCount.toLocaleString()} words</span>
+          <div className="row gap-8">
+            <button className="btn ghost" disabled={saving} onClick={onClose}>
+              Cancel
+            </button>
+            <button
+              className="btn primary"
+              disabled={saving || text === null}
+              onClick={save}
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -263,6 +665,19 @@ function safeHost(u: string): string {
     return new URL(u).hostname;
   } catch {
     return '';
+  }
+}
+/** Canonical form for "is this URL already indexed" checks: ignore
+ * www/hash/trailing-slash differences so the picker doesn't re-offer a
+ * page that's already in the table. */
+function normUrl(u: string): string {
+  try {
+    const p = new URL(u);
+    return (
+      p.hostname.replace(/^www\./i, '') + p.pathname.replace(/\/+$/, '') + p.search
+    ).toLowerCase();
+  } catch {
+    return u.toLowerCase();
   }
 }
 function safePath(u: string): string {

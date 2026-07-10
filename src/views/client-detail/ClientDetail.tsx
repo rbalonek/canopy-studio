@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../../auth/supabaseClient';
 import { Icon } from '../../components/Icon';
@@ -6,8 +6,10 @@ import { useQuery } from '../../data/context';
 import type { ClientHeader } from '../../data/types';
 import { useAppState } from '../../shell/AppState';
 import { useWorkspace } from '../../workspace/WorkspaceProvider';
+import { ClientFormModal } from '../ClientFormModal';
 import { AdAccountsTab } from './AdAccountsTab';
 import { AssetsTab } from './AssetsTab';
+import { LiveCalendar } from '../calendar/LiveCalendar';
 import { BrandTab } from './BrandTab';
 import { CompetitorsTab } from './CompetitorsTab';
 import { LocationsTab } from './LocationsTab';
@@ -18,12 +20,13 @@ type TabId =
   | 'overview'
   | 'brand'
   | 'assets'
+  | 'calendar'
   | 'scraped pages'
   | 'competitors'
   | 'ad accounts'
   | 'locations';
 
-const BASE_TABS: TabId[] = ['overview', 'brand', 'assets', 'scraped pages', 'competitors', 'ad accounts'];
+const BASE_TABS: TabId[] = ['overview', 'brand', 'calendar', 'assets', 'scraped pages', 'competitors', 'ad accounts'];
 
 export function ClientDetail() {
   const { state } = useAppState();
@@ -34,13 +37,56 @@ export function ClientDetail() {
   const shellPrefix = workspace ? `/app/${workspace.slug}` : '/dev';
   const clientsPath = `${shellPrefix}/clients`;
 
+  // bump forces a header re-fetch after the client is edited.
+  const [bump, setBump] = useState(0);
   const { data: header, loading } = useQuery<ClientHeader | null>(
     (p) => p.getClientHeader(clientId),
-    [clientId],
+    [clientId, bump],
   );
 
   const [tab, setTab] = useState<TabId>('overview');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const singular = state.mode === 'agency' ? 'client' : 'location';
+
+  async function onDeleteClient() {
+    setMenuOpen(false);
+    if (!supabase) return;
+    if (
+      !confirm(
+        `Delete "${header?.name ?? clientId}"? This permanently removes the ${singular} and ALL its data — locations, campaign history, scraped pages, brand profile, saved generations. This can't be undone.`,
+      )
+    ) {
+      return;
+    }
+    const { error } = await supabase.from('clients').delete().eq('id', clientId);
+    if (error) {
+      setRefreshMsg({ kind: 'err', text: `Delete failed: ${error.message}` });
+      return;
+    }
+    navigate(clientsPath);
+  }
   const tabs: TabId[] = state.mode === 'agency' ? [...BASE_TABS, 'locations'] : BASE_TABS;
+
+  // Live only: show the brand logo (if analyzed/entered) in place of the
+  // initials avatar. /dev (mock, no workspace) keeps the initials.
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setLogoUrl(null);
+    if (!supabase || !workspace) return;
+    supabase
+      .from('brand_profiles')
+      .select('logo_url')
+      .eq('client_id', clientId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled) setLogoUrl((data?.logo_url as string | null) ?? null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId, workspace?.id]);
 
   const [refreshing, setRefreshing] = useState(false);
   const [refreshMsg, setRefreshMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
@@ -117,12 +163,23 @@ export function ClientDetail() {
       </div>
       <div className="row between" style={{ marginBottom: 20 }}>
         <div className="row gap-12">
-          <div
-            className="logo-mark"
-            style={{ width: 44, height: 44, fontSize: 18, borderRadius: 10 }}
-          >
-            {initials}
-          </div>
+          {logoUrl ? (
+            <img
+              src={logoUrl}
+              alt={`${header.name} logo`}
+              // Auto-width up to a cap so a full wordmark fits; contained so it's
+              // never cropped. Falls back to initials if the image fails to load.
+              style={{ height: 48, maxWidth: 200, objectFit: 'contain', borderRadius: 8 }}
+              onError={() => setLogoUrl(null)}
+            />
+          ) : (
+            <div
+              className="logo-mark"
+              style={{ width: 44, height: 44, fontSize: 18, borderRadius: 10 }}
+            >
+              {initials}
+            </div>
+          )}
           <div className="stack gap-4">
             <h1 className="h0">{header.name}</h1>
             <div className="row gap-8 meta">
@@ -152,9 +209,49 @@ export function ClientDetail() {
           <button className="btn ai">
             <Icon name="sparkles" size={14} /> AI analyze
           </button>
-          <button className="btn ghost">
-            <Icon name="dots" size={14} />
-          </button>
+          <div style={{ position: 'relative' }}>
+            <button className="btn ghost" onClick={() => setMenuOpen((o) => !o)}>
+              <Icon name="dots" size={14} />
+            </button>
+            {menuOpen && (
+              <>
+                {/* click-away backdrop */}
+                <div
+                  style={{ position: 'fixed', inset: 0, zIndex: 40 }}
+                  onClick={() => setMenuOpen(false)}
+                />
+                <div
+                  className="card stack"
+                  style={{
+                    position: 'absolute',
+                    right: 0,
+                    top: 'calc(100% + 6px)',
+                    zIndex: 41,
+                    minWidth: 160,
+                    padding: 4,
+                  }}
+                >
+                  <button
+                    className="btn ghost sm"
+                    style={{ justifyContent: 'flex-start' }}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setEditing(true);
+                    }}
+                  >
+                    <Icon name="gear" size={13} /> Edit {singular}
+                  </button>
+                  <button
+                    className="btn ghost sm"
+                    style={{ justifyContent: 'flex-start', color: 'var(--danger, #c33)' }}
+                    onClick={onDeleteClient}
+                  >
+                    <Icon name="close" size={13} /> Delete {singular}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
       {refreshMsg && (
@@ -188,6 +285,8 @@ export function ClientDetail() {
         <OverviewTab clientId={header.id} />
       ) : tab === 'brand' ? (
         <BrandTab clientId={header.id} />
+      ) : tab === 'calendar' ? (
+        <LiveCalendar clientId={header.id} />
       ) : tab === 'assets' ? (
         <AssetsTab clientId={header.id} />
       ) : tab === 'scraped pages' ? (
@@ -203,6 +302,19 @@ export function ClientDetail() {
           <span className="h2" style={{ textTransform: 'capitalize' }}>{tab}</span>
           <span className="meta">Coming next — this tab isn't wired up yet.</span>
         </div>
+      )}
+
+      {editing && (
+        <ClientFormModal
+          singular={singular}
+          workspaceId={workspace?.id ?? null}
+          existingId={clientId}
+          onClose={() => setEditing(false)}
+          onSaved={() => {
+            setEditing(false);
+            setBump((b) => b + 1);
+          }}
+        />
       )}
     </div>
   );

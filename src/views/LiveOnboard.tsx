@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { supabase } from '../auth/supabaseClient';
+import { enqueueJob } from '../data/useJob';
 import type { WorkspaceMode } from '../data/types';
 
 /**
@@ -132,6 +133,22 @@ export function LiveOnboard() {
               scrapeData.pages_scraped === 1 ? '' : 's'
             } from ${clientWebsite}`,
           );
+          // Chain the AI brand analysis in the background — the profile
+          // fills in while the user lands on the dashboard.
+          enqueueJob({
+            type: 'website_analysis',
+            workspaceId: ws.id,
+            clientId: createdClientId,
+            input: { url: clientWebsite.trim() },
+          }).catch((e) => console.warn('Brand analysis enqueue failed:', e));
+          // And the multi-location scan — detected locations surface as
+          // one-click suggestions in the client's Locations tab.
+          enqueueJob({
+            type: 'location_detection',
+            workspaceId: ws.id,
+            clientId: createdClientId,
+            input: {},
+          }).catch((e) => console.warn('Location detection enqueue failed:', e));
         } else {
           setScrapeStatus(scrapeData?.error ?? 'Scrape returned no pages');
         }

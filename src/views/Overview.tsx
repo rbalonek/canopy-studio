@@ -12,6 +12,7 @@ import { useQuery } from '../data/context';
 import type { Client, ClientPerfRow, UrgentIssue } from '../data/types';
 import { useAppState } from '../shell/AppState';
 import { useWorkspace } from '../workspace/WorkspaceProvider';
+import { SuggestionsPanel } from './SuggestionsPanel';
 
 type LiveAgg = {
   totalSpend: number;
@@ -257,6 +258,8 @@ export function Overview() {
           </div>
         </div>
       </div>
+
+      {workspace && <SuggestionsPanel />}
 
       <div className="card card-pad stack gap-10" style={{ marginBottom: 16 }}>
         <div className="row between">

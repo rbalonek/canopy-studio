@@ -82,7 +82,7 @@ export function ScopedAdStudio() {
         </div>
       </div>
 
-      <AdStudio />
+      <AdStudio clientId={clientId} locationId={locId} />
     </div>
   );
 }

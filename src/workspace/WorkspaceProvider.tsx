@@ -1,5 +1,6 @@
 import { createContext, useContext, type ReactNode } from 'react';
 import type { Workspace } from '../data/types';
+import { useStaleRefresh } from './useStaleRefresh';
 
 /**
  * Provides the current workspace to components mounted under /app/<slug>.
@@ -15,6 +16,9 @@ export function WorkspaceProvider({
   workspace: Workspace;
   children: ReactNode;
 }) {
+  // Kick a background Meta refresh if this workspace's campaign data has
+  // gone stale (once per session; reads stay DB-only either way).
+  useStaleRefresh(workspace.id);
   return <WorkspaceContext.Provider value={workspace}>{children}</WorkspaceContext.Provider>;
 }
 

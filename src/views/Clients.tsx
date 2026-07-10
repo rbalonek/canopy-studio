@@ -7,6 +7,7 @@ import { useQuery } from '../data/context';
 import type { ClientCard } from '../data/types';
 import { useAppState } from '../shell/AppState';
 import { useWorkspace } from '../workspace/WorkspaceProvider';
+import { ClientFormModal } from './ClientFormModal';
 
 const FILTER_CHIPS = ['Active campaigns', 'Has META', 'Multi-location', 'Brand 100%', 'Industry: Dental'];
 
@@ -21,6 +22,7 @@ export function Clients() {
 
   const { data: cards } = useQuery<ClientCard[]>((p) => p.listClientCards());
   const [layout, setLayout] = useState<Layout>('grid');
+  const [showAdd, setShowAdd] = useState(false);
   const shellPrefix = workspace ? `/app/${workspace.slug}` : '/dev';
   const goToClient = (id: string) => navigate(`${shellPrefix}/clients/${id}`);
 
@@ -45,6 +47,28 @@ export function Clients() {
         }
         setLiveByClient(map);
       });
+  }, [workspace?.id, cards?.length]);
+
+  // Brand logos per client_id (live only) — shown on the cards / rows in
+  // place of the initials when a logo has been analyzed or entered.
+  const [logosByClient, setLogosByClient] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!supabase || !workspace) return;
+    let cancelled = false;
+    supabase
+      .from('brand_profiles')
+      .select('client_id, logo_url')
+      .then(({ data }) => {
+        if (cancelled) return;
+        const map: Record<string, string> = {};
+        for (const r of data ?? []) {
+          if (r.logo_url) map[r.client_id as string] = r.logo_url as string;
+        }
+        setLogosByClient(map);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [workspace?.id, cards?.length]);
 
   // Merge live aggregates over the mock placeholder fields when we have
@@ -86,7 +110,7 @@ export function Clients() {
               <Icon name="list" size={12} />
             </button>
           </div>
-          <button className="btn primary">
+          <button className="btn primary" onClick={() => setShowAdd(true)}>
             <Icon name="plus" size={13} /> Add {singular}
           </button>
         </div>
@@ -115,6 +139,7 @@ export function Clients() {
               campaigns={c.activeCampaigns}
               posts={c.postsPerWeek}
               complete={c.complete}
+              logoUrl={logosByClient[c.id] ?? null}
               onClick={() => goToClient(c.id)}
             />
           ))}
@@ -141,9 +166,17 @@ export function Clients() {
                 >
                   <td>
                     <div className="row gap-8">
-                      <div className="logo-mark" style={{ width: 22, height: 22, fontSize: 11 }}>
-                        {c.name.split(' ').map((w) => w[0]).slice(0, 2).join('')}
-                      </div>
+                      {logosByClient[c.id] ? (
+                        <img
+                          src={logosByClient[c.id]}
+                          alt={`${c.name} logo`}
+                          style={{ height: 22, maxWidth: 90, objectFit: 'contain', borderRadius: 4 }}
+                        />
+                      ) : (
+                        <div className="logo-mark" style={{ width: 22, height: 22, fontSize: 11 }}>
+                          {c.name.split(' ').map((w) => w[0]).slice(0, 2).join('')}
+                        </div>
+                      )}
                       <span style={{ fontWeight: 500 }}>{c.name}</span>
                       {c.parent && <span className="tag">multi</span>}
                     </div>
@@ -158,6 +191,15 @@ export function Clients() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {showAdd && (
+        <ClientFormModal
+          singular={singular}
+          workspaceId={workspace?.id ?? null}
+          onClose={() => setShowAdd(false)}
+          onSaved={goToClient}
+        />
       )}
     </div>
   );

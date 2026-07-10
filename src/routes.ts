@@ -50,6 +50,13 @@ export type RouteDef = {
   full?: boolean;
   /** Hide from the sidebar nav — route still resolves, just not listed. */
   hidden?: boolean;
+  /**
+   * Feature is wired to real data and safe to show in the live /app
+   * sidebar. Routes without this flag stay browsable under /dev (the
+   * design showroom) but are hidden from live workspaces until they
+   * stop being mock-only.
+   */
+  live?: boolean;
 };
 
 export const SECTION_LABELS: Record<SidebarSection, string> = {
@@ -68,8 +75,8 @@ export const SECTION_LABELS: Record<SidebarSection, string> = {
 export const ROUTES: RouteDef[] = [
   { id: 'components',    subpath: 'components',    label: 'Component Library', icon: 'grid',     section: 'design-system' },
 
-  { id: 'overview',      subpath: '',              label: 'Overview',          icon: 'home',     section: 'workspace' },
-  { id: 'clients',       subpath: 'clients',       label: 'Clients',           labelByMode: { business: 'Locations' }, icon: 'users', section: 'workspace' },
+  { id: 'overview',      subpath: '',              label: 'Overview',          icon: 'home',     section: 'workspace', live: true },
+  { id: 'clients',       subpath: 'clients',       label: 'Clients',           labelByMode: { business: 'Locations' }, icon: 'users', section: 'workspace', live: true },
   { id: 'client-detail',   subpath: 'clients/:id',                   navTo: 'clients/acme', label: 'Client Detail',   labelByMode: { business: 'Location Detail' }, icon: 'users', section: 'workspace', hidden: true },
   { id: 'location-detail', subpath: 'clients/:id/locations/:locId',  navTo: '', label: 'Location Detail', icon: 'users', section: 'workspace', hidden: true },
   { id: 'campaign-detail', subpath: 'clients/:id/campaigns/:campaignId', navTo: '', label: 'Campaign Detail', icon: 'chart', section: 'workspace', hidden: true },
@@ -77,14 +84,14 @@ export const ROUTES: RouteDef[] = [
   { id: 'ad-detail',       subpath: 'clients/:id/campaigns/:campaignId/adsets/:adSetId/ads/:adId', navTo: '', label: 'Ad Detail', icon: 'chart', section: 'workspace', hidden: true },
   { id: 'client-ad-studio',   subpath: 'clients/:id/ad-studio',                  navTo: '', label: 'Ad Studio (client)',   icon: 'sparkles', section: 'workspace', hidden: true, ai: true },
   { id: 'location-ad-studio', subpath: 'clients/:id/locations/:locId/ad-studio', navTo: '', label: 'Ad Studio (location)', icon: 'sparkles', section: 'workspace', hidden: true, ai: true },
-  { id: 'ad-perf',       subpath: 'ad-performance', label: 'Ad Performance',   icon: 'chart',    section: 'workspace' },
-  { id: 'calendar',      subpath: 'calendar',      label: 'Content Calendar',  icon: 'calendar', section: 'workspace' },
-  { id: 'ad-studio',     subpath: 'ad-studio',     label: 'Ad Studio',         icon: 'sparkles', section: 'workspace', ai: true },
-  { id: 'brand',         subpath: 'brand',         label: 'Brand Intelligence', icon: 'brain',   section: 'workspace' },
+  { id: 'ad-perf',       subpath: 'ad-performance', label: 'Ad Performance',   icon: 'chart',    section: 'workspace', live: true },
+  { id: 'calendar',      subpath: 'calendar',      label: 'Content Calendar',  icon: 'calendar', section: 'workspace', ai: true, live: true },
+  { id: 'ad-studio',     subpath: 'ad-studio',     label: 'Ad Studio',         icon: 'sparkles', section: 'workspace', ai: true, live: true },
+  { id: 'brand',         subpath: 'brand',         label: 'Brand Intelligence', icon: 'brain',   section: 'workspace', live: true },
   { id: 'approvals',     subpath: 'approvals',     label: 'Approvals',         icon: 'check',    section: 'workspace' },
   { id: 'publish',       subpath: 'publish',       label: 'Publishing Queue',  icon: 'queue',    section: 'workspace' },
-  { id: 'reports',       subpath: 'reports',       label: 'Reports',           icon: 'report',   section: 'workspace' },
-  { id: 'settings',      subpath: 'settings',      label: 'Settings',          icon: 'gear',     section: 'workspace' },
+  { id: 'reports',       subpath: 'reports',       label: 'Reports',           icon: 'report',   section: 'workspace', live: true },
+  { id: 'settings',      subpath: 'settings',      label: 'Settings',          icon: 'gear',     section: 'workspace', live: true },
   { id: 'billing',       subpath: 'billing',       label: 'Billing Detail',    icon: 'report',   section: 'workspace' },
 
   { id: 'auth',          subpath: 'auth',          label: 'Auth Shell',        icon: 'link',     section: 'flows', full: true },
