@@ -995,7 +995,17 @@ function PostEditor({
                   <img
                     src={imageUrl}
                     alt="post preview"
-                    style={{ maxHeight: 120, borderRadius: 8, marginTop: 4, objectFit: 'cover' }}
+                    style={{
+                      // Show the WHOLE image, scaled to fit — never cropped.
+                      maxWidth: '100%',
+                      maxHeight: 320,
+                      width: 'auto',
+                      height: 'auto',
+                      objectFit: 'contain',
+                      alignSelf: 'flex-start',
+                      borderRadius: 8,
+                      marginTop: 4,
+                    }}
                     onError={(e) => ((e.currentTarget.style.display = 'none'))}
                   />
                 )}
