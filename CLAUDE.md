@@ -98,6 +98,14 @@ with Meta refresh, website scraper, and the AI platform below. `/dev`
 stays on the mock provider throughout — the showroom never depends on
 the live schema.
 
+**Organic posting and scheduling to Facebook + Instagram is LIVE** (July
+2026): AI-planned content calendars, per-platform captions, AI image
+generation (xAI/OpenAI), image/video/link posts, instant "Post now", and
+Approve → Schedule (FB natively into Meta's scheduled queue; IG via the
+`canopy-posts-due` cron). Details in the Content planner section below.
+The remaining Meta publishing features (Stories, location tagging,
+carousels) are still roadmap.
+
 ## AI pipeline (jobs / providers / skills)
 
 Everything AI runs through one serverless pipeline:
@@ -444,15 +452,17 @@ curl -s -X POST "https://<ref>.supabase.co/functions/v1/meta-refresh-client" \
 ## Meta publishing features (confirmed API-capable)
 
 Four features confirmed viable against the Meta Graph API (researched April
-2026). These extend the live-flow plan and should be built after step 6.
+2026). Feature 1 **shipped** with the Content planner (July 2026) — along
+with the bigger pieces the research assumed: instant publishing, native FB
+scheduling, cron-published IG, and video/link posts. Features 2–4 remain
+roadmap.
 
-### 1. Per-platform captions with separate account tags
-**Build it.** FB and IG are entirely separate API calls (`POST /{page_id}/feed`
+### 1. Per-platform captions with separate account tags — ✅ SHIPPED
+FB and IG are entirely separate API calls (`POST /{page_id}/feed`
 and `POST /{ig_user_id}/media`) with independent `message`/`caption` fields.
-The UI needs two caption inputs when both channels are selected — one for FB,
-one for IG. Store as `captionFb` / `captionIg` on the post record (the current
-`QueuedPost` type has a single implicit caption; split it). Each caption can
-tag the platform-appropriate page handle independently.
+Implemented as `caption_fb` / `caption_ig` on `content_posts` (the AI
+writes them independently and the review step checks they aren't copies);
+`publish-meta-post` sends each caption to its own channel.
 
 ### 2. Auto-publish to Stories
 **Build it — with a clear UI caveat.** Both Instagram and Facebook Stories
