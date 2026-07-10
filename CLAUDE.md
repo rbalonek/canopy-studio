@@ -260,8 +260,21 @@ embedded). Key decisions:
   on purpose: the calendar groups by civil date; composing a real timestamptz
   with the client's timezone is the future publish phase's job.
 - Post status vocabulary: `draft → approved` via the editor;
-  `published / failed` are set by publishing. `scheduled` is reserved for
-  the future pg_cron auto-publish phase.
+  `scheduled` via the Schedule action; `published / failed` set by
+  publishing. Scheduled posts lock the editor (cancel to edit).
+- **Scheduling** (`publish-meta-post` mode `schedule` / `cancel` / `due`):
+  the browser computes `publish_at` (an absolute instant from the post's
+  civil date+time in the scheduler's timezone; ≥10 min out). **Facebook is
+  scheduled natively** (`published=false` + `scheduled_publish_time`) — the
+  post appears in Meta's own Content Library → Scheduled tab and Meta
+  publishes it; `fb_scheduled_post_id` lets cancel delete it. **Instagram's
+  API has no scheduling** (true for all third-party tools) — IG goes into
+  `pending_channels` and the `canopy-posts-due` pg_cron job (every 5 min →
+  cron-dispatch `posts_due` → mode `due`, internal-secret gated) publishes
+  it when `publish_at` arrives; it never appears in Meta's scheduled list.
+  FB-native-only rows just flip to `published` when due. Config problems
+  are caught at schedule time (prepare() runs before any state change), not
+  at 10am the next day.
 - **Post now** (one-time instant publish): the editor's `PublishNowPanel`
   calls the [`publish-meta-post`](supabase/functions/publish-meta-post/index.ts)
   Edge Function — FB via a **Page token** (exchanged from the configured
@@ -306,7 +319,8 @@ embedded). Key decisions:
   the job's finalize writes with the service role.
 
 Migrations: `20260709130000_content_plans.sql`,
-`20260709140000_post_publishes.sql`, `20260710120000_post_media_types.sql`.
+`20260709140000_post_publishes.sql`, `20260710120000_post_media_types.sql`,
+`20260710130000_post_scheduling.sql` (adds the `canopy-posts-due` cron).
 Deploy touches: `enqueue-job`, `run-job`, `cron-dispatch` (shared
 `taskSpecs.ts`), `publish-meta-post`, `generate-post-image`.
 

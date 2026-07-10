@@ -61,6 +61,9 @@ async function dispatch(task: string): Promise<void> {
     case 'reports_due':
       await reportsDue();
       return;
+    case 'posts_due':
+      await postsDue();
+      return;
     default:
       console.error(`[cron-dispatch] unknown task: ${task}`);
   }
@@ -187,6 +190,32 @@ async function reportsDue(): Promise<void> {
       });
     } catch (e) {
       console.error(`[cron-dispatch] report enqueue failed for ${rs.id}:`, e);
+    }
+  });
+}
+
+/** Every 5 minutes: content posts whose scheduled moment has arrived.
+ * publish-meta-post mode 'due' publishes the pending channels (IG — no
+ * API scheduling exists) or, for FB-native-only rows, just marks the post
+ * published (Meta publishes those itself). At-least-once delivery is safe:
+ * 'due' no-ops unless the post is still status='scheduled'. */
+async function postsDue(): Promise<void> {
+  const service = serviceClient();
+  const { data } = await service
+    .from('content_posts')
+    .select('id')
+    .eq('status', 'scheduled')
+    .lte('publish_at', new Date().toISOString());
+
+  const due = (data ?? []) as Array<{ id: string }>;
+  console.log(`[cron-dispatch] posts_due: ${due.length} post(s) due`);
+  await runWithConcurrency(due, CONCURRENCY, async (p) => {
+    const resp = await invokeInternal('publish-meta-post', { content_post_id: p.id, mode: 'due' });
+    const body = await resp.text().catch(() => '');
+    if (!resp.ok) {
+      console.error(`[cron-dispatch] post ${p.id} publish failed (${resp.status}): ${body.slice(0, 300)}`);
+    } else {
+      console.log(`[cron-dispatch] post ${p.id}: ${body.slice(0, 200)}`);
     }
   });
 }

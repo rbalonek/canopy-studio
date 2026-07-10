@@ -52,11 +52,14 @@ interface PostRow {
   video_url: string | null;
   link_url: string | null;
   status: PostStatus;
+  publish_at: string | null;
+  pending_channels: string[] | null;
+  fb_scheduled_post_id: string | null;
   publish_error: string | null;
 }
 
 const POSTS_SELECT =
-  'id, plan_id, client_id, scheduled_date, scheduled_time, channels, format, topic, caption_fb, caption_ig, image_prompt, image_url, media_type, video_url, link_url, status, publish_error';
+  'id, plan_id, client_id, scheduled_date, scheduled_time, channels, format, topic, caption_fb, caption_ig, image_prompt, image_url, media_type, video_url, link_url, status, publish_at, pending_channels, fb_scheduled_post_id, publish_error';
 
 const CADENCES: Array<{ perWeek: number; label: string }> = [
   { perWeek: 7, label: 'Daily' },
@@ -1036,30 +1039,36 @@ function PostEditor({
         className="card-pad row between"
         style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-2)' }}
       >
-        <button className="btn ghost sm" onClick={onDelete} disabled={saving}>
-          Delete post
-        </button>
-        <div className="row gap-8">
-          <button className="btn" disabled={saving || !dirty} onClick={() => save()}>
-            {saving ? 'Saving…' : 'Save changes'}
-          </button>
-          {post.status === 'draft' ? (
-            <button className="btn primary" disabled={saving} onClick={() => save({ status: 'approved' })}>
-              <Icon name="check" size={12} /> Approve
+        {post.status === 'scheduled' ? (
+          <span className="meta">Scheduled — cancel the schedule below to edit or delete.</span>
+        ) : (
+          <>
+            <button className="btn ghost sm" onClick={onDelete} disabled={saving}>
+              Delete post
             </button>
-          ) : (
-            (post.status === 'approved' || post.status === 'failed') && (
-              <button className="btn" disabled={saving} onClick={() => save({ status: 'draft' })}>
-                Back to draft
+            <div className="row gap-8">
+              <button className="btn" disabled={saving || !dirty} onClick={() => save()}>
+                {saving ? 'Saving…' : 'Save changes'}
               </button>
-            )
-          )}
-        </div>
+              {post.status === 'draft' ? (
+                <button className="btn primary" disabled={saving} onClick={() => save({ status: 'approved' })}>
+                  <Icon name="check" size={12} /> Approve
+                </button>
+              ) : (
+                (post.status === 'approved' || post.status === 'failed') && (
+                  <button className="btn" disabled={saving} onClick={() => save({ status: 'draft' })}>
+                    Back to draft
+                  </button>
+                )
+              )}
+            </div>
+          </>
+        )}
       </div>
 
-      {/* ---- Publish now (organic, live) ---- */}
-      {(post.status === 'approved' || post.status === 'failed' || post.status === 'published') && (
-        <PublishNowPanel
+      {/* ---- Publish / schedule (organic) ---- */}
+      {post.status !== 'draft' && (
+        <PublishPanel
           post={post}
           blocker={
             dirty
@@ -1081,9 +1090,26 @@ function PostEditor({
   );
 }
 
-/** Publish one approved post to Facebook/Instagram immediately. Organic
- * posts go LIVE (no paused state), so it's a confirm-then-send action. */
-function PublishNowPanel({
+/** Unwrap a functions.invoke failure into the function's real message —
+ * a non-2xx throws a generic FunctionsHttpError; the useful text ("No Meta
+ * access token configured…") is in the response body on error.context. */
+async function invokeErrorText(data: any, error: unknown): Promise<string> {
+  let text: string | null = (data?.error as string | undefined) ?? null;
+  if (!text && error && typeof error === 'object' && 'context' in error) {
+    try {
+      text = (await ((error as { context: Response }).context).json())?.error ?? null;
+    } catch {
+      /* body not JSON — fall through */
+    }
+  }
+  return text ?? (error as Error | null)?.message ?? 'Publish failed';
+}
+
+/** Publish an approved post immediately, or schedule it for its date+time:
+ * Facebook is scheduled NATIVELY (shows in Meta's Content Library →
+ * Scheduled and Meta publishes it); Instagram has no API scheduling, so
+ * CanopyStudio's cron publishes it when the moment arrives. */
+function PublishPanel({
   post,
   blocker,
   onReload,
@@ -1093,49 +1119,103 @@ function PublishNowPanel({
   blocker: string | null;
   onReload: () => void;
 }) {
-  const [confirming, setConfirming] = useState(false);
-  const [publishing, setPublishing] = useState(false);
+  const [confirming, setConfirming] = useState<'now' | 'schedule' | null>(null);
+  const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
 
   const carouselStory = post.format === 'carousel' || post.format === 'story';
+  const wantFb = post.channels.includes('facebook');
+  const wantIg = post.channels.includes('instagram');
 
-  async function publish() {
+  // The scheduled instant, interpreted in THIS browser's timezone — the
+  // only place that knows what "10:00" was meant to be.
+  const publishAtLocal = new Date(`${post.scheduled_date}T${post.scheduled_time}`);
+  const publishAtLabel = publishAtLocal.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+  const tooSoon = publishAtLocal.getTime() - Date.now() < 10 * 60_000;
+  const scheduleBlocker =
+    blocker ??
+    (tooSoon
+      ? `The scheduled time (${publishAtLabel}) is in the past or under 10 minutes away — move it, or use Post now`
+      : null);
+  const publishedBlocker =
+    post.status === 'published' ? 'Already published — duplicate it as a new post to re-send' : null;
+
+  async function invoke(body: Record<string, unknown>, okText: (data: any) => string) {
     if (!supabase) return;
-    setPublishing(true);
+    setBusy(true);
     setResult(null);
     const { data, error } = await supabase.functions.invoke('publish-meta-post', {
-      body: { content_post_id: post.id },
+      body: { content_post_id: post.id, ...body },
     });
-    setPublishing(false);
-    setConfirming(false);
+    setBusy(false);
+    setConfirming(null);
     if (error || !data?.ok) {
-      // A non-2xx makes invoke() throw a generic FunctionsHttpError; the
-      // function's real message ("No Meta access token configured…") is in
-      // the response body on error.context.
-      let text: string | null = (data?.error as string | undefined) ?? null;
-      if (!text && error && 'context' in error) {
-        try {
-          text = (await (error.context as Response).json())?.error ?? null;
-        } catch {
-          /* body not JSON — fall through to the generic message */
-        }
-      }
-      setResult({ ok: false, text: text ?? error?.message ?? 'Publish failed' });
+      setResult({ ok: false, text: await invokeErrorText(data, error) });
       onReload();
       return;
     }
-    const chans = (data.results ?? [])
-      .filter((r: { ok: boolean }) => r.ok)
-      .map((r: { channel: string }) => r.channel)
-      .join(' + ');
-    setResult({
-      ok: true,
-      text:
-        data.status === 'partial'
-          ? `Partially published (${chans}). ${data.error ?? ''}`
-          : `Published live to ${chans}.`,
-    });
+    setResult({ ok: true, text: okText(data) });
     onReload();
+  }
+
+  const postNow = () =>
+    invoke({ mode: 'now' }, (data) => {
+      const chans = (data.results ?? [])
+        .filter((r: { ok: boolean }) => r.ok)
+        .map((r: { channel: string }) => r.channel)
+        .join(' + ');
+      return data.status === 'partial'
+        ? `Partially published (${chans}). ${data.error ?? ''}`
+        : `Published live to ${chans}.`;
+    });
+
+  const schedule = () =>
+    invoke(
+      { mode: 'schedule', publish_at: publishAtLocal.toISOString() },
+      (data) => `Scheduled for ${publishAtLabel}. ${data.note ?? ''}`,
+    );
+
+  const cancel = () => invoke({ mode: 'cancel' }, (data) => data.note ?? 'Schedule canceled.');
+
+  // ---- Scheduled state: info + cancel ----
+  if (post.status === 'scheduled') {
+    return (
+      <div className="card-pad stack gap-8" style={{ borderTop: '1px solid var(--border)' }}>
+        <div className="row between" style={{ gap: 12, flexWrap: 'wrap' }}>
+          <div className="stack gap-2" style={{ maxWidth: 560 }}>
+            <div className="row gap-8">
+              <Icon name="calendar" size={13} />
+              <span className="h2">Scheduled for {publishAtLabel}</span>
+            </div>
+            <span className="meta" style={{ fontSize: 11 }}>
+              {post.fb_scheduled_post_id
+                ? "Facebook: queued in Meta itself — it's visible in the Page's Content Library → Scheduled and Meta publishes it. "
+                : ''}
+              {(post.pending_channels ?? []).includes('instagram')
+                ? 'Instagram: has no API scheduling, so CanopyStudio publishes it within ~5 minutes of the time (it will not appear in Meta’s scheduled list).'
+                : ''}
+            </span>
+          </div>
+          <button className="btn" disabled={busy} onClick={cancel}>
+            {busy ? 'Canceling…' : 'Cancel schedule'}
+          </button>
+        </div>
+        {result && (
+          <div
+            className="meta"
+            style={{ fontSize: 12, color: result.ok ? 'var(--green)' : 'var(--danger, #c33)' }}
+          >
+            {result.ok ? '✓ ' : '⚠ '}
+            {result.text}
+          </div>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -1144,7 +1224,7 @@ function PublishNowPanel({
         <div className="stack gap-2" style={{ maxWidth: 520 }}>
           <div className="row gap-8">
             <Icon name="bolt" size={13} />
-            <span className="h2">Post now</span>
+            <span className="h2">Publish</span>
             {post.status === 'published' && (
               <span className="pill green" style={{ fontSize: 10 }}>
                 Published
@@ -1152,43 +1232,62 @@ function PublishNowPanel({
             )}
           </div>
           <span className="meta" style={{ fontSize: 11 }}>
-            Publishes this post to the selected channels{' '}
-            <strong>immediately and live</strong> — organic posts have no paused state. Uses the
-            client's Meta token, Facebook Page, and Instagram Business account (Ad Accounts tab).
+            <strong>Schedule</strong> queues it for {publishAtLabel} —{' '}
+            {wantFb ? "Facebook lands in Meta's own scheduled queue" : ''}
+            {wantFb && wantIg ? '; ' : ''}
+            {wantIg ? 'Instagram is published by CanopyStudio at the time (no API scheduling exists)' : ''}
+            . <strong>Post now</strong> publishes immediately and live.
           </span>
           {carouselStory && (
             <span className="meta" style={{ fontSize: 11, color: 'var(--ai)' }}>
-              Note: {post.format} publishing needs the multi-image / stories flow — this button
-              posts a single image/text. Polls & link stickers on Stories must be added manually in
-              the app.
+              Note: {post.format} publishing needs the multi-image / stories flow — this posts a
+              single image/text. Polls & link stickers on Stories must be added manually in the app.
             </span>
           )}
         </div>
         <div className="row gap-8" style={{ alignItems: 'center' }}>
-          {!confirming ? (
-            <button
-              className="btn primary"
-              disabled={publishing || !!blocker}
-              onClick={() => setConfirming(true)}
-              title={blocker ?? undefined}
-            >
-              <Icon name="bolt" size={12} /> Post now →
-            </button>
+          {confirming === null ? (
+            <>
+              <button
+                className="btn primary"
+                disabled={busy || !!scheduleBlocker || !!publishedBlocker}
+                onClick={() => setConfirming('schedule')}
+                title={publishedBlocker ?? scheduleBlocker ?? undefined}
+              >
+                <Icon name="calendar" size={12} /> Schedule →
+              </button>
+              <button
+                className="btn"
+                disabled={busy || !!blocker || !!publishedBlocker}
+                onClick={() => setConfirming('now')}
+                title={publishedBlocker ?? blocker ?? undefined}
+              >
+                <Icon name="bolt" size={12} /> Post now →
+              </button>
+            </>
           ) : (
             <>
-              <button className="btn primary" disabled={publishing} onClick={publish}>
-                {publishing ? 'Posting…' : 'Confirm — publish live'}
+              <button
+                className="btn primary"
+                disabled={busy}
+                onClick={confirming === 'now' ? postNow : schedule}
+              >
+                {busy
+                  ? 'Working…'
+                  : confirming === 'now'
+                  ? 'Confirm — publish live'
+                  : `Confirm — schedule for ${publishAtLabel}`}
               </button>
-              <button className="btn ghost" disabled={publishing} onClick={() => setConfirming(false)}>
+              <button className="btn ghost" disabled={busy} onClick={() => setConfirming(null)}>
                 Cancel
               </button>
             </>
           )}
         </div>
       </div>
-      {blocker && (
+      {(publishedBlocker ?? blocker ?? scheduleBlocker) && (
         <span className="meta" style={{ fontSize: 11 }}>
-          {blocker}
+          {publishedBlocker ?? blocker ?? scheduleBlocker}
         </span>
       )}
       {result && (
