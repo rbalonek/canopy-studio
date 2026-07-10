@@ -81,7 +81,7 @@ export const MODES = [
  * choice is an ai_settings row (task 'image_generation'), never code.
  * xAI is the default preset. */
 export const IMAGE_PROVIDERS = [
-  { id: 'xai', label: 'xAI (Grok)', modelPlaceholder: 'grok-2-image' },
+  { id: 'xai', label: 'xAI (Grok)', modelPlaceholder: 'grok-imagine-image' },
   { id: 'openai', label: 'OpenAI', modelPlaceholder: 'gpt-image-1' },
 ] as const;
 

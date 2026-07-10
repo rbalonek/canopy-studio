@@ -24,8 +24,11 @@ interface GenerateRequest {
   prompt?: string;
 }
 
+// xAI retired grok-2-image (mid-2026) for the grok-imagine family —
+// 'grok-imagine-image' (fast) / 'grok-imagine-image-quality' (better).
+// These are only fallbacks: the ai_settings row's free-text model wins.
 const DEFAULT_MODELS: Record<string, string> = {
-  xai: 'grok-2-image',
+  xai: 'grok-imagine-image',
   openai: 'gpt-image-1',
 };
 
@@ -65,18 +68,16 @@ Deno.serve(async (req) => {
       .maybeSingle();
     const provider = (settings?.primary_provider as string | null) ?? 'xai';
     const model =
-      (settings?.primary_model as string | null)?.trim() || DEFAULT_MODELS[provider] || 'grok-2-image';
+      (settings?.primary_model as string | null)?.trim() ||
+      DEFAULT_MODELS[provider] ||
+      DEFAULT_MODELS.xai;
 
-    let b64: string;
-    if (provider === 'openai') {
-      b64 = await openaiImage(prompt, model);
-    } else {
-      b64 = await xaiImage(prompt, model);
-    }
+    const image =
+      provider === 'openai' ? await openaiImage(prompt, model) : await xaiImage(prompt, model);
 
     // Store in the public client-assets bucket under the post's client, so
     // the URL renders app-wide and can be handed to the Meta publisher.
-    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const bytes = await imageBytes(image);
     const path = `${post.client_id}/${crypto.randomUUID()}-generated.png`;
     const { error: upErr } = await service.storage
       .from('client-assets')
@@ -97,7 +98,20 @@ Deno.serve(async (req) => {
   }
 });
 
-async function xaiImage(prompt: string, model: string): Promise<string> {
+/** A provider result: inline base64 or a (temporary) URL to fetch. */
+type GeneratedImage = { b64?: string; url?: string };
+
+async function imageBytes(image: GeneratedImage): Promise<Uint8Array> {
+  if (image.b64) return Uint8Array.from(atob(image.b64), (c) => c.charCodeAt(0));
+  if (image.url) {
+    const resp = await fetch(image.url);
+    if (!resp.ok) throw new Error(`Could not download the generated image (${resp.status})`);
+    return new Uint8Array(await resp.arrayBuffer());
+  }
+  throw new Error('Provider returned no image data');
+}
+
+async function xaiImage(prompt: string, model: string): Promise<GeneratedImage> {
   const key = Deno.env.get('XAI_API_KEY');
   if (!key) throw new Error('XAI_API_KEY is not configured (Edge Function secrets)');
   const resp = await fetch('https://api.x.ai/v1/images/generations', {
@@ -109,12 +123,11 @@ async function xaiImage(prompt: string, model: string): Promise<string> {
   if (!resp.ok) {
     throw new Error(`xAI image generation failed: ${(data as any)?.error?.message ?? (data as any)?.error ?? resp.statusText}`);
   }
-  const b64 = (data as any)?.data?.[0]?.b64_json;
-  if (!b64) throw new Error('xAI returned no image data');
-  return b64 as string;
+  const first = (data as any)?.data?.[0] ?? {};
+  return { b64: first.b64_json as string | undefined, url: first.url as string | undefined };
 }
 
-async function openaiImage(prompt: string, model: string): Promise<string> {
+async function openaiImage(prompt: string, model: string): Promise<GeneratedImage> {
   const key = Deno.env.get('OPENAI_API_KEY');
   if (!key) throw new Error('OPENAI_API_KEY is not configured (Edge Function secrets)');
   const resp = await fetch('https://api.openai.com/v1/images/generations', {
@@ -126,7 +139,6 @@ async function openaiImage(prompt: string, model: string): Promise<string> {
   if (!resp.ok) {
     throw new Error(`OpenAI image generation failed: ${(data as any)?.error?.message ?? resp.statusText}`);
   }
-  const b64 = (data as any)?.data?.[0]?.b64_json;
-  if (!b64) throw new Error('OpenAI returned no image data');
-  return b64 as string;
+  const first = (data as any)?.data?.[0] ?? {};
+  return { b64: first.b64_json as string | undefined, url: first.url as string | undefined };
 }
