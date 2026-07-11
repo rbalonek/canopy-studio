@@ -152,8 +152,10 @@ tab on every client) covers the full loop:
 - **Per-platform captions** — separate FB and IG copy per post (they're
   independent API calls; IG gets hooks + hashtags, FB stays link-friendly).
 - **Imagery** — per-post image briefs; "Generate image" renders them via
-  the configured provider (xAI Grok by default, OpenAI selectable —
-  Settings → AI). Image / video / link media types per post.
+  the configured provider (xAI `grok-imagine-image` by default —
+  `-quality` variant and OpenAI selectable in Settings → AI; the model
+  field is free text, so provider renames never need a deploy).
+  Image / video / link media types per post.
 - **Post now** — instant live publish to the selected channels, gated to
   approved posts behind a confirm.
 - **Schedule** — Facebook posts are scheduled *natively in Meta* (they

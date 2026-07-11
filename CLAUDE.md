@@ -169,6 +169,18 @@ Everything AI runs through one serverless pipeline:
   `cron.job_run_details` and the AI tabs surface "not configured"
   errors.
 
+**Hosted state (as of 2026-07-11):** everything above exists except
+`RESEND_API_KEY` (email report delivery; Slack works without it). The Vault
+pair was only created 2026-07-10 — every cron before that failed silently,
+so treat old `cron.job_run_details` errors as historical. Along the way
+`INTERNAL_FN_SECRET` was **rotated to a dedicated random value**; it is NOT
+the anon key (an old convention some comments used to claim). If the two
+halves ever drift again, don't hunt for the old value — rotate both to a
+fresh one (`supabase secrets set INTERNAL_FN_SECRET=…` +
+`vault.update_secret` on `canopy_internal_fn_secret`) and verify by
+comparing sha256 digests (`supabase secrets list` shows the function-side
+digest; hash the vault side in SQL with `extensions.digest`).
+
 ## Website scraper
 
 [`scrape-client`](supabase/functions/scrape-client/index.ts) discovers + fetches
@@ -309,8 +321,15 @@ embedded). Key decisions:
   default / `openai`, free-text model, Settings → AI panel — never
   hardcode a model), calls the provider, stores the PNG in the public
   `client-assets` bucket under the post's client, and sets
-  `content_posts.image_url`. Secrets: `XAI_API_KEY` (add to the checklist)
-  / `OPENAI_API_KEY`.
+  `content_posts.image_url`. Secrets: `XAI_API_KEY` / `OPENAI_API_KEY`.
+  **xAI retired `grok-2-image` mid-2026** — the current family is
+  `grok-imagine-image` (fast; the code fallback), `grok-imagine-image-quality`,
+  and `grok-imagine-video` / `-1.5` (unused so far — the natural future
+  AI-video source for the `video` media type). If a provider errors with
+  "model does not exist", the fix is a Settings → AI edit (the row's
+  free-text model beats the code fallback — no deploy); update the fallback
+  in `generate-post-image` when convenient. The function accepts both
+  provider response shapes (`b64_json` or a temporary `url`).
 - **Media types**: `media_type` = `image` (default) / `video` / `link` with
   `video_url` / `link_url` columns. Publishing branches per type — video:
   FB `/{page}/videos` (file_url), IG as a **Reel** whose container
@@ -442,12 +461,27 @@ supabase db query --linked --output table 'select ...' # ad-hoc (works when the 
 
 # Smoke-test an Edge Function via the internal path (no browser session).
 # The gateway needs a JWT-shaped Authorization header (verify_jwt); the code
-# trusts X-Internal-Secret. ANON_JWT = the legacy anon key; must match INTERNAL_FN_SECRET.
+# trusts X-Internal-Secret. INTERNAL_FN_SECRET is its own random value (NOT
+# the anon key — that old convention is dead); read it from Vault:
+#   supabase db query --linked --output json \
+#     "select decrypted_secret from vault.decrypted_secrets where name='canopy_internal_fn_secret';"
 curl -s -X POST "https://<ref>.supabase.co/functions/v1/meta-refresh-client" \
   -H "Authorization: Bearer $ANON_JWT" \
   -H "X-Internal-Secret: $INTERNAL_FN_SECRET" \
   -d '{"client_id":"..."}'
 ```
+
+## Verifying changes end-to-end
+
+[`.claude/skills/verify/SKILL.md`](.claude/skills/verify/SKILL.md) is the
+battle-tested recipe for driving the live `/app` UI against the **local**
+stack (never hosted — `.env.local` points at real accounts): local
+Supabase + `functions serve` with a borrowed key, a throwaway
+user/workspace seeded via the auth admin API + psql, Vite with env
+overrides, and playwright-core on system Chrome. It includes the gotchas
+that cost time (env var names, psql heredoc/transaction traps, ambiguous
+Playwright selectors). Use it before committing feature work; clean up the
+test data after.
 
 ## Meta publishing features (confirmed API-capable)
 
