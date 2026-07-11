@@ -3,6 +3,12 @@
 This file is for future Claude Code sessions in this repo. Read alongside
 [`README.md`](README.md) (which covers the same ground for humans).
 
+**Before starting roadmap work, check [`ROADMAP.md`](ROADMAP.md)** — the
+phased checklist to a fully-live product (billing, OAuth, Google Ads,
+approvals, remaining wireframe surfaces). Flip items to `- [x]` in the same
+commit that completes them; keep the `Status:` lines on external/manual
+steps current.
+
 ## What this repo is
 
 The **app** half of CanopyStudio — an AI-grounded ad + content platform.

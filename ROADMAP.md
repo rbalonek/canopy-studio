@@ -1,0 +1,230 @@
+# CanopyStudio Roadmap — to fully-live product
+
+Tracks the path off all template/sample surfaces and onto real auth, payments,
+approvals, and Google Ads. **How to use this file:**
+
+- Every feature commit that completes an item flips its `- [ ]` to `- [x]`
+  **in the same commit** — git history is the progress record.
+- External/manual steps carry a `Status:` line — update it as things move
+  (e.g. `Status: submitted 2026-07-14, awaiting review`).
+- Full design rationale (schemas, flows, decisions) lives in the plan this was
+  cut from; the checklists here are the execution surface. Future sessions:
+  check this file for current phase before starting roadmap work.
+
+**Locked decisions:** email + Google sign-in now, Facebook Login later (rides
+the Meta App Review) · Google Ads reporting-first · legal pages public on
+`.app` · Stripe for payments (USD credit ledger; margin in per-event billed
+price) · BYO provider keys per workspace · per-client/agency profile docs ·
+one-click Approve→Publish (ads always PAUSED; organic posts confirm-first).
+
+---
+
+## Phase 0 — External account kickoffs (no code, start immediately)
+
+- [ ] **Stripe**: create account, complete business/bank verification (1–3 days).
+      Status: not started
+- [ ] **Meta**: create production Meta App (type Business), add Facebook Login
+      for Business product.
+      Status: not started
+- [ ] **Meta**: start Business Verification on the owning Business Manager
+      (prereq for Advanced Access; days–2 weeks, runs *before* the 2–4 week
+      App Review).
+      Status: not started
+- [ ] **Google Cloud**: create project, OAuth consent screen (External),
+      verify `.app` domain ownership.
+      Status: not started
+- [ ] **Google Cloud**: two OAuth clients — (1) Supabase Google sign-in
+      (redirect `https://<ref>.supabase.co/auth/v1/callback`), (2) Google Ads
+      connect (redirect = `google-oauth` Edge Function URL).
+      Status: not started
+- [ ] **Google Ads**: apply for developer token Basic Access from an MCC
+      account (API Center). Test accounts work instantly meanwhile.
+      Status: not started
+
+## Phase 1 — Legal pages, login cleanup, Google sign-in
+
+- [ ] `src/views/legal/` — `LegalLayout.tsx` (public shell) + `Privacy.tsx`,
+      `Terms.tsx`, `DataDeletion.tsx`. Privacy covers Meta Platform Data
+      handling/retention/deletion **and** the Google API Services User Data
+      Policy Limited Use disclosure (verbatim phrase). DataDeletion documents
+      the Phase 4 callback. Terms include AI-content disclaimer + payment
+      placeholder.
+- [ ] `src/App.tsx` — `/legal/*` routes outside the auth gates.
+- [ ] `src/views/Login.tsx` — strip "Redwood Digital Strategies" branding +
+      fake testimonial; real links to `/legal/terms` + `/legal/privacy`; hide
+      azure/apple buttons until configured.
+- [ ] README quick pass — remove stale "/app not yet" claim.
+- [ ] Manual: enable Google provider in Supabase dashboard, production Site
+      URL + redirect allow-list.
+      Status: not started
+- [ ] Manual: add legal URLs to Meta app settings + Google consent screen.
+      Status: blocked on legal pages deployed
+
+## Phase 2 — Profile docs + BYO provider keys
+
+### 2a. Per-client / per-agency profile docs
+- [ ] Migration `profile_docs` (one doc per entity: `client_id` null =
+      agency-level; `unique nulls not distinct (workspace_id, client_id)`;
+      member-CRUD RLS like `skills`).
+- [ ] `_shared/ai/orchestrator.ts` `loadProfiles()` + `_shared/ai/prompts.ts`
+      `profileBlock()` (`## AGENCY PROFILE` / `## CLIENT PROFILE: <name>`);
+      append after `skillsBlock` in every `taskSpecs.ts` builder that loads
+      skills. Deploy: `enqueue-job`, `run-job`, `cron-dispatch`.
+- [ ] UI: ClientDetail "Profile" tab (markdown editor, Skills-editor style);
+      agency doc card in Settings → workspace. Provider methods in
+      `provider.ts` / `supabaseProvider.ts`.
+
+### 2b. BYO API keys
+- [ ] Migration `workspace_api_keys` (`(workspace_id, provider)` PK,
+      anthropic/openai/xai; member SELECT never reads `api_key`, owner-only
+      writes — `workspace_meta_credentials` pattern).
+- [ ] `_shared/ai/providers.ts` — optional `apiKey?` param with env fallback;
+      `keySource: 'workspace' | 'platform'` on `LlmResult`; orchestrator loads
+      workspace keys once per step. Same resolution in `generate-post-image`.
+- [ ] UI: Settings → **api** tab becomes `ApiKeysPanel.tsx` ("Connect your own
+      AI keys to lower your token cost"; set/replace/remove, owner-only).
+
+## Phase 3 — Stripe billing: credit ledger, plans, webhooks
+
+Ledger in USD credits; `billed_usd = max(taskFloor, rateCard × 2.0)` (+$0.13
+surcharge over $0.50 raw; floors $0.13 generation / $0.10 analysis; images
+flat ~$0.20; BYO-key events 10% of rate-card, no floor).
+
+- [ ] Migration `billing_core`: `billing_accounts`, `credit_ledger`
+      (append-only, trigger-maintained balance cache), `stripe_events`
+      (webhook idempotency), `ai_usage_events.billed_usd` + `key_source`
+      columns. Member read; all writes service-role.
+- [ ] `usage.ts`: billed pricing + ledger debit in `recordUsage`; **fix
+      leaks** — add xai/grok + image rates (unknown models currently cost $0)
+      and add usage recording to `generate-post-image`.
+- [ ] Edge Function `stripe-webhook` (`verify_jwt=false`, Stripe-Signature
+      gate): `checkout.session.completed`, `invoice.paid`,
+      `customer.subscription.*`; idempotent via `stripe_events`.
+- [ ] Edge Function `billing-portal` (authed): Checkout (subscribe/top-up) +
+      Billing Portal sessions.
+- [ ] Subscription refill on `invoice.paid` (`subscription_grant`, rolls over
+      while active); top-up flow; trial grant for `plan='none'` at workspace
+      creation.
+- [ ] Friends & family: $0 subscription + `ff_expires_at`; monthly
+      `billing_cycle` cron (+ −$25 threshold) → Stripe Invoice for −balance;
+      `invoice.paid` → `postpaid_invoice` row.
+- [ ] Enforcement: `enqueue-job` + `generate-post-image` block at balance ≤ 0
+      (prepaid) / < −$50 (friends & family); 402 surfaced via `error.context`.
+- [ ] UI: `BillingPanel.tsx` in Settings → billing (plan, balance, usage this
+      month, Subscribe/Upgrade/Add credits, Stripe Portal link).
+- [ ] Manual: Stripe Products/Prices (starter, pro, ff-$0), webhook endpoint,
+      `supabase secrets set STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET` + price ids.
+      Status: blocked on Phase 0 Stripe verification
+- [ ] Finalize Terms payment language.
+
+## Phase 4 — Meta OAuth, data-deletion callback, App Review, FB sign-in
+
+Tokens land in existing credential tables; `resolveAccessToken` untouched;
+manual System-User paste stays as an "Advanced" option.
+
+- [ ] Migration `meta_oauth`: `oauth_states` (service-role only, single-use,
+      `provider` column reused by Google), `expires_at` on
+      `workspace_meta_credentials` + `client_meta_credentials`,
+      `deletion_requests` table.
+- [ ] Edge Function `meta-oauth`: POST start (authed/owner) → FB Login for
+      Business dialog URL; GET callback (`verify_jwt=false`, state-row gate) →
+      long-lived token exchange → upsert credentials → 302 back to Settings.
+- [ ] Edge Function `meta-data-deletion` (`verify_jwt=false`, `signed_request`
+      verification) → `deletion_requests` + confirmation URL/code.
+- [ ] UI: "Connect with Facebook" primary action in `WorkspaceMetaPanel` +
+      `AdAccountsTab`; token expiry display + ≤7-day reconnect warning;
+      cron-dispatch expiry check → connector notification.
+- [ ] Facebook sign-in: add `'facebook'` to `OAuthProvider` union
+      (`src/auth/AuthProvider.tsx`) + Login button; enable provider in
+      Supabase dashboard.
+- [ ] `config.toml`: `verify_jwt=false` for `meta-oauth`, `meta-data-deletion`.
+- [ ] Manual: Meta app redirect URI + Data Deletion Callback URL + legal URLs.
+      Status: blocked on Phase 1
+- [ ] Manual: **App Review** — `pages_manage_posts`, `pages_read_engagement`,
+      `instagram_business_content_publish`, `instagram_business_basic`,
+      `ads_management`, `business_management`, Page Public Metadata Access,
+      `email`/`public_profile`. Screencasts: OAuth connect, post publish,
+      PAUSED ad creation. 2–4 weeks after Business Verification.
+      Status: blocked on Business Verification + working OAuth flow
+
+## Phase 5 — Approvals live + Publishing Queue live
+
+Pure composition over `publish-meta-post` / `publish-meta-ad` — no new tables
+or functions.
+
+- [ ] Provider methods `listPendingApprovals` + `listPublishQueue`
+      (`provider.ts` / `supabaseProvider.ts`).
+- [ ] `Approvals.tsx` live branch: draft `content_posts` (Approve / Approve &
+      Schedule / **Approve & Post now** with per-item confirm — organic has no
+      paused state); draft `generations` (**Approve & Publish (paused)** —
+      single-click safe); `content_plans` bulk approve (status flip only).
+      Sequential fan-out, per-item results, one failure never blocks the rest.
+- [ ] `Publish.tsx` live branch: scheduled/published/failed posts +
+      `post_publishes`/`ad_publishes` audit rows; retry/cancel actions.
+- [ ] `src/routes.ts`: flip `live: true` on `approvals` + `publish`.
+
+## Phase 6 — Google Ads reporting
+
+One table set with a `platform` column (display layer is already
+platform-agnostic); Google campaign ids prefixed `gads_<id>`.
+
+- [ ] Migration `google_ads_reporting`: `platform` column on `campaigns`,
+      `ad_sets`, `ads`, `campaign_metrics_daily`;
+      `workspace_google_credentials` (owner-only, refresh token +
+      `login_customer_id`); `google_customer_id` on `locations` + `clients`.
+- [ ] Edge Function `google-oauth` (clone of `meta-oauth`, `provider='google'`,
+      `access_type=offline&prompt=consent`, scope `adwords`).
+- [ ] Edge Function `google-ads-refresh` mirroring `meta-refresh-client`:
+      account-level `searchStream` GAQL only (never per-campaign),
+      `metrics_by_period` snapshot + month-chunked daily backfill. Secrets:
+      `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_OAUTH_CLIENT_ID/SECRET`.
+- [ ] `cron-dispatch` `refresh_all` fans out to Google for clients with a
+      `google_customer_id`.
+- [ ] UI: `WorkspaceGooglePanel.tsx` connect card in Settings → connections;
+      Google customer-id field in `AdAccountsTab`; platform filter chip on
+      campaign lists/Overview; additive `metaMetrics.ts` conversions mapping.
+- [ ] Manual: `adwords`-scope OAuth verification — submit demo video the day
+      the connect flow works on a test account (4–6 weeks; longest external
+      item).
+      Status: blocked on connect flow demo
+
+## Phase 7 — Surface completion + docs
+
+- [ ] `AdPerf.tsx` live branch: cross-client ads leaderboard via
+      `metaMetrics.ts` (+ platform filter).
+- [ ] `BrandIntelligence.tsx` live branch: wire /dev tabs to live
+      `brand_profiles` + `competitors` + `scraped_domains` signals.
+- [ ] Settings → team: members list, role change/remove (SECURITY DEFINER
+      RPC), invite-by-email (`workspace_invites` + accept-on-login).
+- [ ] Settings → notifications + excluded accounts: **cut** from live TABS
+      (notification-log link folds into connections; per-location ad-account
+      scoping covers exclusions).
+- [ ] `Overview.tsx` / `Clients.tsx`: remove residual mock placeholder merges.
+- [ ] README + CLAUDE.md full refresh: routing/live-state, billing
+      architecture + ledger model, new secrets (`STRIPE_*`, `FB_APP_*`,
+      `GOOGLE_*`), new `verify_jwt=false` functions and their gates.
+
+---
+
+## External dependency ladder
+
+| Blocker | Started | Needed by | Lead time |
+|---|---|---|---|
+| Stripe verification | Phase 0 | Phase 3 | days |
+| Meta Business Verification → App Review | Phase 0 / submit Phase 4 | external-client publishing, FB sign-in | 2–6 weeks total |
+| Google OAuth brand review (sign-in) | Phase 0 | Phase 1 | days |
+| Google Ads developer token (Basic) | Phase 0 | Phase 6 prod | days–weeks |
+| Google `adwords` scope verification | early Phase 6 | Phase 6 GA | 4–6 weeks |
+| Public legal pages | Phase 1 | all three reviews | — |
+
+## Cross-cutting conventions
+
+- Every new browser `functions.invoke` keeps the `error.context` unwrap.
+- Every new `verify_jwt=false` function has a real gate (Stripe signature /
+  single-use `oauth_states` row / `signed_request` verification) — the
+  `cron-dispatch` precedent.
+- New credential tables copy `workspace_meta_credentials`: member SELECT that
+  never reads the secret column, owner-only writes, service-role reads in
+  Edge Functions.
+- Never hardcode model ids; pricing constants live in `usage.ts` until a
+  table earns its keep.
