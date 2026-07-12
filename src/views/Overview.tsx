@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useAuth } from '../auth/AuthProvider';
-import { supabase } from '../auth/supabaseClient';
 import { AIBadge } from '../components/AIBadge';
 import { AreaChart } from '../components/AreaChart';
 import { DeltaSpark } from '../components/DeltaSpark';
@@ -12,24 +11,7 @@ import { useQuery } from '../data/context';
 import type { Client, ClientPerfRow, UrgentIssue } from '../data/types';
 import { useAppState } from '../shell/AppState';
 import { useWorkspace } from '../workspace/WorkspaceProvider';
-import { SuggestionsPanel } from './SuggestionsPanel';
-
-type LiveAgg = {
-  totalSpend: number;
-  totalResults: number;
-  activeCampaigns: number;
-  avgRoas: number;
-  costPerResult: number;
-};
-
-type CampaignRow = {
-  client_id: string;
-  ad_account_id: string | null;
-  status: string | null;
-  mtd_spend: number;
-  mtd_results: number;
-  roas: number;
-};
+import { LiveOverview } from './overview/LiveOverview';
 
 type LocationLite = {
   id: string;
@@ -58,51 +40,17 @@ export function Overview() {
   const workspace = useWorkspace();
   const entity = state.mode === 'agency' ? 'clients' : 'locations';
 
+  // Live app: the fully real dashboard (period toggle, daily-history charts,
+  // computed alerts, budget pacing). Below this line is the /dev wireframe.
+  if (workspace) return <LiveOverview />;
+
+  // /dev wireframe from here down: mock provider only. The old live-merge
+  // code (campaign/location fetches folded over mock rows) moved wholesale
+  // into LiveOverview, which reads real daily history instead.
   const { data: clients } = useQuery<Client[]>((p) => p.listClients());
   const { data: perf } = useQuery<ClientPerfRow[]>((p) => p.listClientPerf());
   const { data: urgent } = useQuery<UrgentIssue[]>((p) => p.listUrgent());
-
-  // Pull live campaigns (workspace-scoped via RLS). We keep the raw rows
-  // so we can re-aggregate when the user filters by scope (industry /
-  // single client / single location) without re-querying.
-  const [campaignRows, setCampaignRows] = useState<CampaignRow[] | null>(null);
-  useEffect(() => {
-    if (!supabase || !workspace) return;
-    supabase
-      .from('campaigns')
-      .select('client_id, ad_account_id, status, mtd_spend, mtd_results, roas')
-      .then(({ data }) => {
-        const rows = (data ?? []).map((r) => ({
-          client_id: r.client_id as string,
-          ad_account_id: (r.ad_account_id as string | null) ?? null,
-          status: (r.status as string | null) ?? null,
-          mtd_spend: parseFloat(String(r.mtd_spend ?? 0)) || 0,
-          mtd_results: parseFloat(String(r.mtd_results ?? 0)) || 0,
-          roas: parseFloat(String(r.roas ?? 0)) || 0,
-        }));
-        setCampaignRows(rows);
-      });
-  }, [workspace?.id]);
-
-  // Pull locations so the picker can offer sub-location selection for
-  // multi-location clients (Big Air → Big Air - Burnsville, …).
-  const [locations, setLocations] = useState<LocationLite[] | null>(null);
-  useEffect(() => {
-    if (!supabase || !workspace) return;
-    supabase
-      .from('locations')
-      .select('id, name, client_id, ad_account_id')
-      .then(({ data }) => {
-        setLocations(
-          (data ?? []).map((r) => ({
-            id: r.id as string,
-            name: r.name as string,
-            client_id: r.client_id as string,
-            ad_account_id: (r.ad_account_id as string | null) ?? null,
-          })),
-        );
-      });
-  }, [workspace?.id]);
+  const locations: LocationLite[] = [];
 
   const displayName =
     (typeof auth.user?.user_metadata?.display_name === 'string'
@@ -141,86 +89,17 @@ export function Overview() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [perf, scope, clients]);
 
-  // Re-aggregate live campaigns whenever scope (all / industry / one client /
-  // one location) changes. Location scope filters by ad_account_id since
-  // each location is its own ad account.
-  const live: LiveAgg | null = useMemo(() => {
-    if (!campaignRows) return null;
-    const scoped = campaignRows.filter((r) => {
-      if (scope === 'all') return true;
-      if (scope.startsWith('loc:')) {
-        const locId = scope.slice(4);
-        const loc = locations?.find((l) => l.id === locId);
-        return !!loc?.ad_account_id && r.ad_account_id === loc.ad_account_id;
-      }
-      const cl = clients?.find((c) => c.id === r.client_id);
-      if (!cl) return false;
-      if (scope.startsWith('ind:')) return cl.industry === scope.slice(4);
-      if (scope.startsWith('one:')) return cl.name === scope.slice(4);
-      return true;
-    });
-    const totalSpend = scoped.reduce((s, r) => s + r.mtd_spend, 0);
-    const totalResults = scoped.reduce((s, r) => s + r.mtd_results, 0);
-    const roasVals = scoped.map((r) => r.roas).filter((v) => v > 0);
-    const avgRoas = roasVals.length ? roasVals.reduce((a, b) => a + b, 0) / roasVals.length : 0;
-    const activeCampaigns = scoped.filter((r) => r.status === 'ACTIVE').length;
-    const costPerResult = totalResults > 0 ? totalSpend / totalResults : 0;
-    return { totalSpend, totalResults, activeCampaigns, avgRoas, costPerResult };
-  }, [campaignRows, scope, clients, locations]);
-
-  // Prefer live campaign aggregates when available (workspace context),
-  // fall back to the mock-perf math for /dev showcase rendering.
-  const totalSpend = live?.totalSpend ?? filtered.reduce((a, c) => a + parseNum(c.spend), 0);
-  const totalConv = live?.totalResults ?? filtered.reduce((a, c) => a + c.conv, 0);
-  const avgRoas =
-    live?.avgRoas ??
-    (filtered.length ? filtered.reduce((a, c) => a + parseNum(c.roas), 0) / filtered.length : 0);
-  const avgCpl =
-    live?.costPerResult ??
-    (filtered.length ? filtered.reduce((a, c) => a + parseNum(c.cpl), 0) / filtered.length : 0);
-  // For honesty in sparklines: noData iff we're rendering live aggregates and
-  // they're all zero. On /dev/* with mock perf, leave deltas/sparks alone.
-  const noData = !!live && live.totalSpend === 0 && live.totalResults === 0;
-
-  // Per-client live aggregates for the Performance by clients table.
-  // Group campaign rows by client_id, fold in industry from clients.
-  const livePerf = useMemo<ClientPerfRow[] | null>(() => {
-    if (!campaignRows || !clients) return null;
-    const byClient = new Map<
-      string,
-      { spend: number; results: number; roasVals: number[] }
-    >();
-    for (const r of campaignRows) {
-      const agg = byClient.get(r.client_id) ?? { spend: 0, results: 0, roasVals: [] };
-      agg.spend += r.mtd_spend;
-      agg.results += r.mtd_results;
-      if (r.roas > 0) agg.roasVals.push(r.roas);
-      byClient.set(r.client_id, agg);
-    }
-    const out: ClientPerfRow[] = [];
-    for (const c of clients) {
-      const agg = byClient.get(c.id);
-      if (!agg) continue;
-      const roas = agg.roasVals.length
-        ? `${(agg.roasVals.reduce((a, b) => a + b, 0) / agg.roasVals.length).toFixed(1)}x`
-        : '—';
-      const cpl = agg.results > 0 ? `$${Math.round(agg.spend / agg.results)}` : '—';
-      out.push({
-        name: c.name,
-        spend: `$${Math.round(agg.spend).toLocaleString()}`,
-        conv: Math.round(agg.results),
-        roas,
-        cpl,
-        spark: 0,
-        status: 'Active',
-        delta: 0,
-      });
-    }
-    return out;
-  }, [campaignRows, clients]);
-
-  // Choose mock vs live for the table + chart legend.
-  const tableRows = live !== null ? (livePerf ?? []) : filtered;
+  // Wireframe totals from the mock perf rows.
+  const totalSpend = filtered.reduce((a, c) => a + parseNum(c.spend), 0);
+  const totalConv = filtered.reduce((a, c) => a + c.conv, 0);
+  const avgRoas = filtered.length
+    ? filtered.reduce((a, c) => a + parseNum(c.roas), 0) / filtered.length
+    : 0;
+  const avgCpl = filtered.length
+    ? filtered.reduce((a, c) => a + parseNum(c.cpl), 0) / filtered.length
+    : 0;
+  const noData = false;
+  const tableRows = filtered;
 
   const scopeLabel =
     scope === 'all'
@@ -258,8 +137,6 @@ export function Overview() {
           </div>
         </div>
       </div>
-
-      {workspace && <SuggestionsPanel />}
 
       <div className="card card-pad stack gap-10" style={{ marginBottom: 16 }}>
         <div className="row between">
@@ -400,13 +277,8 @@ export function Overview() {
         {[
           {
             label: 'Active campaigns',
-            value: String(live?.activeCampaigns ?? 0),
-            meta:
-              live && live.activeCampaigns > 0
-                ? `Across ${totalClients} ${entity}`
-                : totalClients
-                  ? `0 active across ${totalClients} ${entity}`
-                  : 'No campaigns yet',
+            value: '0',
+            meta: totalClients ? `0 active across ${totalClients} ${entity}` : 'No campaigns yet',
           },
           { label: 'Posts pending approval', value: '0', meta: 'Nothing in queue' },
           { label: 'Scheduled (next 7d)', value: '0', meta: 'Nothing scheduled' },
@@ -477,13 +349,7 @@ export function Overview() {
                       <td style={{ fontVariantNumeric: 'tabular-nums' }}>{c.roas}</td>
                       <td style={{ fontVariantNumeric: 'tabular-nums' }}>{c.cpl}</td>
                       <td>
-                        {live !== null ? (
-                          <span className="meta" style={{ fontSize: 11 }}>
-                            —
-                          </span>
-                        ) : (
-                          <DeltaSpark seed={c.spark} up={c.delta >= 0} w={72} h={22} />
-                        )}
+                        <DeltaSpark seed={c.spark} up={c.delta >= 0} w={72} h={22} />
                       </td>
                       <td>
                         <Status s={c.status} />
@@ -547,7 +413,7 @@ export function Overview() {
           </div>
         </div>
         <div style={{ padding: 16 }}>
-          {live !== null || filtered.length === 0 ? (
+          {filtered.length === 0 ? (
             <div
               className="stack gap-8"
               style={{
@@ -559,15 +425,9 @@ export function Overview() {
                 borderRadius: 8,
               }}
             >
-              <span style={{ fontSize: 13 }}>
-                {live && live.totalSpend > 0
-                  ? 'Daily breakdown not pulled yet'
-                  : 'No spend data yet'}
-              </span>
+              <span style={{ fontSize: 13 }}>No spend data yet</span>
               <span className="meta" style={{ fontSize: 11, textAlign: 'center', maxWidth: 360 }}>
-                {live && live.totalSpend > 0
-                  ? `Aggregate MTD spend is $${Math.round(live.totalSpend).toLocaleString()}. Per-day time-series lands when we port multi-period insights from ad-optimizer — until then this chart is intentionally empty.`
-                  : `Connect a Meta ad account on a client (Clients → ${state.mode === 'agency' ? 'a client' : 'a location'} → Ad Accounts) to start pulling spend over time.`}
+                {`Connect a Meta ad account on a client (Clients → ${state.mode === 'agency' ? 'a client' : 'a location'} → Ad Accounts) to start pulling spend over time.`}
               </span>
             </div>
           ) : (

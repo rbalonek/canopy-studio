@@ -228,10 +228,19 @@ platform-agnostic); Google campaign ids prefixed `gads_<id>`.
       (`accept_workspace_invites` runs before the workspace list loads).
       No invite email sent yet — UI says so.
 - [x] Settings → notifications + excluded accounts: cut from live TABS.
-- [ ] `Overview.tsx` / `Clients.tsx`: replace reads of the seeded
-      `client_perf` / `urgent_issues` fixture tables with aggregates
-      computed from real `campaigns` rows (deliberately deferred — a
-      careful refactor of the main dashboard, not a mechanical sweep).
+- [x] `Overview.tsx`: replaced wholesale with `overview/LiveOverview.tsx`
+      for the live app — working period toggle (Yesterday/7d/MTD/30d/90d)
+      over `campaign_metrics_daily` via `aggregateDaily`, real KPI
+      sparklines + spend-over-time chart (no seeds), wired counts row,
+      computed "Needs attention" alerts (failed posts, expiring token,
+      budget overpace, spend-without-results — the `urgent_issues`
+      fixture is gone from live), **Monthly spend vs budget** pacing card
+      (`clients.monthly_budget`, inline-editable, month-end projection),
+      and the AI suggestions panel moved below the chart, collapsible
+      ("Ack" renamed to "Mark seen"). The /dev wireframe keeps the mock
+      composition.
+- [ ] `Clients.tsx`: same treatment for its residual `client_perf`
+      placeholder fields (smaller surface; next pass).
 - [x] README + CLAUDE.md refresh: live-state summary, billing ledger
       section, OAuth-connections section, secrets checklist
       (`STRIPE_*`, `FB_APP_*`, `GOOGLE_*`), `verify_jwt=false` gate
