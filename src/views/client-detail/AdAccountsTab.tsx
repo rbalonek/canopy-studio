@@ -87,7 +87,125 @@ export function AdAccountsTab({ clientId }: { clientId: string }) {
       )}
       {connection && !editing && <PullPastData clientId={clientId} />}
       <MetaAppOverridePanel clientId={clientId} />
+      <GoogleAdsPanel clientId={clientId} />
       <CampaignsTable clientId={clientId} />
+    </div>
+  );
+}
+
+/**
+ * Per-client Google Ads reporting: which customer id this client pulls
+ * from (clients.google_customer_id — member-editable like the rest of the
+ * client row) + a manual refresh. The workspace-level connection (OAuth
+ * refresh token + MCC) lives in Settings → Connections.
+ */
+function GoogleAdsPanel({ clientId }: { clientId: string }) {
+  const [customerId, setCustomerId] = useState<string | null | undefined>(undefined);
+  const [draft, setDraft] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState<'save' | 'refresh' | null>(null);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!supabase) return setCustomerId(null);
+      const { data } = await supabase
+        .from('clients')
+        .select('google_customer_id')
+        .eq('id', clientId)
+        .maybeSingle();
+      if (cancelled) return;
+      const cid = (data?.google_customer_id as string | null) ?? null;
+      setCustomerId(cid);
+      setDraft(cid ?? '');
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId]);
+
+  if (customerId === undefined) return null;
+
+  async function save() {
+    if (!supabase) return;
+    setBusy('save');
+    setMsg(null);
+    const value = draft.replace(/[^0-9]/g, '') || null;
+    const { error } = await supabase
+      .from('clients')
+      .update({ google_customer_id: value })
+      .eq('id', clientId);
+    setBusy(null);
+    if (error) return setMsg({ ok: false, text: error.message });
+    setCustomerId(value);
+    setEditing(false);
+    setMsg({ ok: true, text: value ? 'Saved — nightly refresh includes Google Ads now.' : 'Removed.' });
+  }
+
+  async function refreshNow() {
+    if (!supabase) return;
+    setBusy('refresh');
+    setMsg(null);
+    const { data, error } = await supabase.functions.invoke('google-ads-refresh', {
+      body: { client_id: clientId },
+    });
+    setBusy(null);
+    if (error || !data?.ok) {
+      setMsg({ ok: false, text: await invokeErrorText(data, error) });
+      return;
+    }
+    setMsg({ ok: true, text: `Pulled ${data.campaigns ?? 0} campaign(s) from ${data.accounts ?? 1} account(s).` });
+  }
+
+  return (
+    <div className="card">
+      <div className="card-pad row between">
+        <div className="stack gap-2">
+          <span style={{ fontWeight: 500 }}>Google Ads</span>
+          <span className="meta">
+            {customerId
+              ? `Reporting from customer ${customerId}`
+              : 'Not configured — add this client’s Google Ads customer id to pull campaigns.'}
+          </span>
+          {msg && (
+            <span className="meta" style={{ color: msg.ok ? 'var(--accent)' : 'var(--danger, #c33)' }}>
+              {msg.ok ? '✓ ' : '⚠ '}
+              {msg.text}
+            </span>
+          )}
+        </div>
+        <div className="row gap-8">
+          {customerId && !editing && (
+            <button className="btn sm" onClick={refreshNow} disabled={busy !== null}>
+              {busy === 'refresh' ? 'Refreshing…' : 'Refresh now'}
+            </button>
+          )}
+          {!editing ? (
+            <button className="btn sm" onClick={() => setEditing(true)}>
+              <Icon name="link" size={12} /> {customerId ? 'Change' : 'Set customer id'}
+            </button>
+          ) : (
+            <>
+              <input
+                type="text"
+                className="input"
+                placeholder="123-456-7890"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                style={{ width: 140 }}
+                disabled={busy !== null}
+              />
+              <button className="btn primary sm" onClick={save} disabled={busy !== null}>
+                {busy === 'save' ? 'Saving…' : 'Save'}
+              </button>
+              <button className="btn ghost sm" onClick={() => setEditing(false)} disabled={busy !== null}>
+                Cancel
+              </button>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

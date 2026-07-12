@@ -186,21 +186,29 @@ or functions.
 One table set with a `platform` column (display layer is already
 platform-agnostic); Google campaign ids prefixed `gads_<id>`.
 
-- [ ] Migration `google_ads_reporting`: `platform` column on `campaigns`,
+- [x] Migration `google_ads_reporting`: `platform` column on `campaigns`,
       `ad_sets`, `ads`, `campaign_metrics_daily`;
       `workspace_google_credentials` (owner-only, refresh token +
       `login_customer_id`); `google_customer_id` on `locations` + `clients`.
-- [ ] Edge Function `google-oauth` (clone of `meta-oauth`, `provider='google'`,
-      `access_type=offline&prompt=consent`, scope `adwords`).
-- [ ] Edge Function `google-ads-refresh` mirroring `meta-refresh-client`:
-      account-level `searchStream` GAQL only (never per-campaign),
-      `metrics_by_period` snapshot + month-chunked daily backfill. Secrets:
-      `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_OAUTH_CLIENT_ID/SECRET`.
-- [ ] `cron-dispatch` `refresh_all` fans out to Google for clients with a
-      `google_customer_id`.
-- [ ] UI: `WorkspaceGooglePanel.tsx` connect card in Settings → connections;
-      Google customer-id field in `AdAccountsTab`; platform filter chip on
-      campaign lists/Overview; additive `metaMetrics.ts` conversions mapping.
+- [x] Edge Function `google-oauth` (clone of `meta-oauth`, `provider='google'`,
+      `access_type=offline&prompt=consent`, scope `adwords`;
+      `verify_jwt=false` on the GET callback).
+- [x] Edge Function `google-ads-refresh` mirroring `meta-refresh-client`:
+      account-level `searchStream` GAQL only (never per-campaign), campaign
+      snapshot with `metrics_by_period` (this_month/last_month/last_30d) +
+      month-chunked idempotent daily backfill with missing-campaign
+      filtering. Ids stored `gads_<id>`. **Untestable until the developer
+      token + a connected account exist — first real pull will need a
+      debugging pass.** Ad-group/ad-level ingestion deferred until campaign
+      reporting is validated (empty drill-downs are handled by the UI).
+      Secrets: `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_OAUTH_CLIENT_ID/SECRET`.
+- [x] `cron-dispatch` `refresh_all` fans out to `google-ads-refresh` for
+      clients with a client- or location-level `google_customer_id`.
+- [x] UI: `WorkspaceGooglePanel.tsx` connect card in Settings → connections
+      (Google Ads removed from "coming soon"); Google customer-id field +
+      "Refresh now" on `AdAccountsTab`. Platform filter chips on campaign
+      lists/Overview deferred to Phase 7 polish (google rows flow through
+      the same tables/catalog already).
 - [ ] Manual: `adwords`-scope OAuth verification — submit demo video the day
       the connect flow works on a test account (4–6 weeks; longest external
       item).

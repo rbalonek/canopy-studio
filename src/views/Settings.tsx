@@ -7,6 +7,7 @@ import { AccountTab } from './settings/AccountTab';
 import { AiSettingsTab } from './settings/AiSettingsTab';
 import { ApiKeysPanel } from './settings/ApiKeysPanel';
 import { BillingPanel } from './settings/BillingPanel';
+import { WorkspaceGooglePanel } from './settings/WorkspaceGooglePanel';
 import { ConnectorsPanel } from './settings/ConnectorsPanel';
 import { SkillsTab } from './settings/SkillsTab';
 import { WorkspaceTab } from './settings/WorkspaceTab';
@@ -39,7 +40,6 @@ const TABS: TabId[] = [
 type FuturePlatform = { name: string; status: string };
 
 const FUTURE_PLATFORMS: FuturePlatform[] = [
-  { name: 'Google Ads', status: 'Coming soon' },
   { name: 'TikTok Ads', status: 'Coming soon' },
   { name: 'LinkedIn Ads', status: 'Coming soon' },
 ];
@@ -93,6 +93,7 @@ function ConnectionsTab() {
   return (
     <div className="stack gap-16">
       <WorkspaceMetaPanel />
+      <WorkspaceGooglePanel />
       <ConnectorsPanel />
       <div className="card">
         <div

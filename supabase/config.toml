@@ -429,6 +429,12 @@ verify_jwt = false
 enabled = true
 verify_jwt = false
 
+# google-oauth's GET is the browser arriving back from accounts.google.com
+# (no JWT); the single-use oauth_states row is the gate, as with meta-oauth.
+[functions.google-oauth]
+enabled = true
+verify_jwt = false
+
 [functions.meta-refresh-client]
 enabled = true
 verify_jwt = true

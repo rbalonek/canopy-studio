@@ -157,6 +157,26 @@ async function refreshAll(): Promise<void> {
     }
   });
 
+  // Google Ads reporting: clients with a configured customer id (client- or
+  // location-level) refresh on the same nightly cadence.
+  const [gClientRes, gLocRes] = await Promise.all([
+    service.from('clients').select('id').not('google_customer_id', 'is', null),
+    service.from('locations').select('client_id').not('google_customer_id', 'is', null),
+  ]);
+  const googleClients = new Set<string>();
+  for (const row of (gClientRes.data ?? []) as any[]) googleClients.add(row.id as string);
+  for (const row of (gLocRes.data ?? []) as any[]) googleClients.add(row.client_id as string);
+  if (googleClients.size) {
+    console.log(`[cron-dispatch] google refresh: ${googleClients.size} client(s)`);
+    await runWithConcurrency(Array.from(googleClients), CONCURRENCY, async (clientId) => {
+      const resp = await invokeInternal('google-ads-refresh', { client_id: clientId });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => '');
+        console.error(`[cron-dispatch] google refresh ${clientId} failed (${resp.status}): ${body.slice(0, 300)}`);
+      }
+    });
+  }
+
   await warnExpiringMetaTokens(service);
 }
 
