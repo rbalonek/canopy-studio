@@ -77,14 +77,15 @@ one-click Approve→Publish (ads always PAUSED; organic posts confirm-first).
       CRUD like SkillsTab — no provider changes needed).
 
 ### 2b. BYO API keys
-- [ ] Migration `workspace_api_keys` (`(workspace_id, provider)` PK,
+- [x] Migration `workspace_api_keys` (`(workspace_id, provider)` PK,
       anthropic/openai/xai; member SELECT never reads `api_key`, owner-only
       writes — `workspace_meta_credentials` pattern).
-- [ ] `_shared/ai/providers.ts` — optional `apiKey?` param with env fallback;
+- [x] `_shared/ai/providers.ts` — `apiKey?` on LlmOptions with env fallback;
       `keySource: 'workspace' | 'platform'` on `LlmResult`; orchestrator loads
-      workspace keys once per step. Same resolution in `generate-post-image`.
-- [ ] UI: Settings → **api** tab becomes `ApiKeysPanel.tsx` ("Connect your own
-      AI keys to lower your token cost"; set/replace/remove, owner-only).
+      workspace keys once per step and threads them to all four callLlm
+      sites. Same resolution in `generate-post-image` (xai/openai).
+- [x] UI: Settings → **api** tab is `ApiKeysPanel.tsx` (set/replace/remove,
+      owner-only writes, key never SELECTed back).
 
 ## Phase 3 — Stripe billing: credit ledger, plans, webhooks
 

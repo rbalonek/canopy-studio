@@ -5,6 +5,7 @@ import { Icon } from '../components/Icon';
 import { useWorkspace } from '../workspace/WorkspaceProvider';
 import { AccountTab } from './settings/AccountTab';
 import { AiSettingsTab } from './settings/AiSettingsTab';
+import { ApiKeysPanel } from './settings/ApiKeysPanel';
 import { ConnectorsPanel } from './settings/ConnectorsPanel';
 import { SkillsTab } from './settings/SkillsTab';
 import { WorkspaceTab } from './settings/WorkspaceTab';
@@ -74,6 +75,8 @@ export function Settings() {
             <AiSettingsTab />
           ) : tab === 'skills' ? (
             <SkillsTab />
+          ) : tab === 'api' ? (
+            <ApiKeysPanel />
           ) : (
             <Empty title={`${tab} — wireframe`} body="Form-based settings panel following shell conventions." />
           )}

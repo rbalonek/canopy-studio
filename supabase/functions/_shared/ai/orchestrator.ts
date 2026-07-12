@@ -94,6 +94,28 @@ export async function loadSkills(
     .map((s) => ({ name: s.name as string, content: s.content as string }));
 }
 
+export type WorkspaceKeys = Partial<Record<'anthropic' | 'openai' | 'xai', string>>;
+
+/** BYO provider keys for a workspace (workspace_api_keys, owner-managed).
+ * Absent providers fall back to the platform's Edge Function secrets
+ * inside providers.ts. */
+export async function loadWorkspaceKeys(
+  service: ServiceClient,
+  workspaceId: string,
+): Promise<WorkspaceKeys> {
+  const { data } = await service
+    .from('workspace_api_keys')
+    .select('provider, api_key')
+    .eq('workspace_id', workspaceId);
+  const keys: WorkspaceKeys = {};
+  // deno-lint-ignore no-explicit-any
+  for (const row of (data ?? []) as any[]) {
+    const key = (row.api_key as string | null)?.trim();
+    if (key) keys[row.provider as keyof WorkspaceKeys] = key;
+  }
+  return keys;
+}
+
 /** Profile docs for prompt injection: the agency doc (client_id null)
  * always applies; the client doc only when the job is client-scoped.
  * Agency doc sorts first so the client doc can override it. */
@@ -208,6 +230,7 @@ export async function runOrchestratedStep(args: {
 }): Promise<StepOutcome> {
   const { service, workspaceId, jobId, task, settings, spec, step, state } = args;
   const track = { service, workspaceId, jobId, task };
+  const keys = await loadWorkspaceKeys(service, workspaceId);
 
   if (settings.mode !== 'collaboration') {
     const result = await callLlm(
@@ -217,7 +240,7 @@ export async function runOrchestratedStep(args: {
         { role: 'system', content: spec.system },
         { role: 'user', content: spec.user },
       ],
-      { ...spec.llmOptions, jsonMode: spec.json },
+      { ...spec.llmOptions, jsonMode: spec.json, apiKey: keys[settings.primaryProvider] },
     );
     await recordUsage(service, { ...track, result });
     return {
@@ -237,7 +260,7 @@ export async function runOrchestratedStep(args: {
         { role: 'system', content: spec.system },
         { role: 'user', content: spec.user },
       ],
-      { ...spec.llmOptions, jsonMode: spec.json },
+      { ...spec.llmOptions, jsonMode: spec.json, apiKey: keys[settings.primaryProvider] },
     );
     await recordUsage(service, { ...track, result });
     const draft = spec.json ? extractJson(result.text) : result.text;
@@ -270,7 +293,7 @@ Be specific - reference the exact items that need work.`;
         { role: 'system', content: REVIEW_SYSTEM_PROMPT },
         { role: 'user', content: reviewPrompt },
       ],
-      spec.llmOptions,
+      { ...spec.llmOptions, apiKey: keys[settings.reviewerProvider] },
     );
     await recordUsage(service, { ...track, result });
     return {
@@ -310,7 +333,7 @@ Return the complete refined output${spec.json ? ' as valid JSON in the same stru
       { role: 'system', content: REFINEMENT_SYSTEM_PROMPT },
       { role: 'user', content: refinementPrompt },
     ],
-    { ...spec.llmOptions, jsonMode: spec.json },
+    { ...spec.llmOptions, jsonMode: spec.json, apiKey: keys[settings.primaryProvider] },
   );
   await recordUsage(service, { ...track, result });
 

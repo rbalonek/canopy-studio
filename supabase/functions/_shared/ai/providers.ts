@@ -26,6 +26,9 @@ export interface LlmResult {
   usage: LlmUsage;
   provider: Provider;
   model: string;
+  /** Whose credentials paid for the call — the workspace's own BYO key or
+   * the platform's Edge Function secret. Billing prices these differently. */
+  keySource: 'workspace' | 'platform';
 }
 
 export interface LlmOptions {
@@ -34,6 +37,9 @@ export interface LlmOptions {
   /** Ask for a JSON object response. OpenAI: native json_object mode.
    * Anthropic: no native mode — callers run extractJson() on the text. */
   jsonMode?: boolean;
+  /** Workspace BYO key for this provider. Falls back to the platform's
+   * Edge Function secret when absent. */
+  apiKey?: string;
 }
 
 export const DEFAULT_MODELS: Record<Provider, string> = {
@@ -83,7 +89,7 @@ async function callAnthropic(
   messages: LlmMessage[],
   options: LlmOptions,
 ): Promise<LlmResult> {
-  const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
+  const apiKey = options.apiKey || Deno.env.get('ANTHROPIC_API_KEY');
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not configured');
 
   const system = messages
@@ -135,6 +141,7 @@ async function callAnthropic(
     },
     provider: 'anthropic',
     model,
+    keySource: options.apiKey ? 'workspace' : 'platform',
   };
 }
 
@@ -143,7 +150,7 @@ async function callOpenAi(
   messages: LlmMessage[],
   options: LlmOptions,
 ): Promise<LlmResult> {
-  const apiKey = Deno.env.get('OPENAI_API_KEY');
+  const apiKey = options.apiKey || Deno.env.get('OPENAI_API_KEY');
   if (!apiKey) throw new Error('OPENAI_API_KEY is not configured');
 
   const resp = await fetchLlm('https://api.openai.com/v1/chat/completions', {
@@ -176,6 +183,7 @@ async function callOpenAi(
     },
     provider: 'openai',
     model,
+    keySource: options.apiKey ? 'workspace' : 'platform',
   };
 }
 
