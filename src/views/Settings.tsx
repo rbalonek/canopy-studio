@@ -10,8 +10,12 @@ import { BillingPanel } from './settings/BillingPanel';
 import { WorkspaceGooglePanel } from './settings/WorkspaceGooglePanel';
 import { ConnectorsPanel } from './settings/ConnectorsPanel';
 import { SkillsTab } from './settings/SkillsTab';
+import { TeamTab } from './settings/TeamTab';
 import { WorkspaceTab } from './settings/WorkspaceTab';
 
+// notifications + excluded-accounts were cut: the notification log lives
+// with the connectors it belongs to, and per-location ad-account scoping
+// already covers account exclusion.
 type TabId =
   | 'account'
   | 'workspace'
@@ -20,9 +24,7 @@ type TabId =
   | 'ai'
   | 'skills'
   | 'billing'
-  | 'api'
-  | 'notifications'
-  | 'excluded accounts';
+  | 'api';
 
 const TABS: TabId[] = [
   'account',
@@ -33,8 +35,6 @@ const TABS: TabId[] = [
   'skills',
   'billing',
   'api',
-  'notifications',
-  'excluded accounts',
 ];
 
 type FuturePlatform = { name: string; status: string };
@@ -70,6 +70,8 @@ export function Settings() {
             <AccountTab />
           ) : tab === 'workspace' ? (
             <WorkspaceTab />
+          ) : tab === 'team' ? (
+            <TeamTab />
           ) : tab === 'connections' ? (
             <ConnectionsTab />
           ) : tab === 'ai' ? (
