@@ -93,28 +93,32 @@ Ledger in USD credits; `billed_usd = max(taskFloor, rateCard × 2.0)` (+$0.13
 surcharge over $0.50 raw; floors $0.13 generation / $0.10 analysis; images
 flat ~$0.20; BYO-key events 10% of rate-card, no floor).
 
-- [ ] Migration `billing_core`: `billing_accounts`, `credit_ledger`
-      (append-only, trigger-maintained balance cache), `stripe_events`
-      (webhook idempotency), `ai_usage_events.billed_usd` + `key_source`
-      columns. Member read; all writes service-role.
-- [ ] `usage.ts`: billed pricing + ledger debit in `recordUsage`; **fix
-      leaks** — add xai/grok + image rates (unknown models currently cost $0)
-      and add usage recording to `generate-post-image`.
-- [ ] Edge Function `stripe-webhook` (`verify_jwt=false`, Stripe-Signature
-      gate): `checkout.session.completed`, `invoice.paid`,
-      `customer.subscription.*`; idempotent via `stripe_events`.
-- [ ] Edge Function `billing-portal` (authed): Checkout (subscribe/top-up) +
-      Billing Portal sessions.
-- [ ] Subscription refill on `invoice.paid` (`subscription_grant`, rolls over
-      while active); top-up flow; trial grant for `plan='none'` at workspace
-      creation.
-- [ ] Friends & family: $0 subscription + `ff_expires_at`; monthly
-      `billing_cycle` cron (+ −$25 threshold) → Stripe Invoice for −balance;
-      `invoice.paid` → `postpaid_invoice` row.
-- [ ] Enforcement: `enqueue-job` + `generate-post-image` block at balance ≤ 0
-      (prepaid) / < −$50 (friends & family); 402 surfaced via `error.context`.
-- [ ] UI: `BillingPanel.tsx` in Settings → billing (plan, balance, usage this
-      month, Subscribe/Upgrade/Add credits, Stripe Portal link).
+- [x] Migration `billing_core`: `billing_accounts`, `credit_ledger`
+      (append-only, trigger-maintained balance cache — trigger verified
+      locally), `stripe_events` (webhook idempotency),
+      `ai_usage_events.billed_usd` + `key_source` columns, daily
+      `canopy-billing-cycle` pg_cron. Member read; all writes service-role.
+- [x] `usage.ts`: `billedUsd()` (×2 markup, $0.13/$0.10 floors, +$0.13
+      surcharge >$0.50 raw, BYO = 10% fee no floor) + ledger debit in
+      `recordUsage`; leaks fixed — grok chat rates, flat image rates, and
+      `recordImageUsage` in `generate-post-image`.
+- [x] Edge Function `stripe-webhook` (`verify_jwt=false`, raw-fetch HMAC
+      Stripe-Signature gate — no SDK): `checkout.session.completed` (topup),
+      `invoice.paid` (grant / postpaid clear), `customer.subscription.*`
+      (plan sync); idempotent via `stripe_events`, failed handlers release
+      the idempotency row so Stripe retries.
+- [x] Edge Function `billing-portal` (authed, owner-gated): Checkout
+      subscribe/top-up + Billing Portal sessions; never writes the ledger.
+- [x] Friends & family: monthly-1st + −$25-threshold invoicing in new
+      internal `billing-cycle` function (cron-dispatch task
+      `billing_cycle`); `invoice.paid` webhook posts `postpaid_invoice`.
+- [x] Enforcement: `enqueue-job` + `generate-post-image` return 402 via
+      `billingBlockReason` (prepaid ≤ $0; friends & family ≤ −$50; **no
+      `billing_accounts` row = billing not enabled = never blocked**, so
+      existing workspaces are unaffected until they subscribe — replaces
+      the planned create_workspace trial grant).
+- [x] UI: `BillingPanel.tsx` in Settings → billing (plan, balance, usage
+      this month, ledger table, Subscribe/Upgrade/Add credits/Portal).
 - [ ] Manual: Stripe Products/Prices (starter, pro, ff-$0), webhook endpoint,
       `supabase secrets set STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET` + price ids.
       Status: blocked on Phase 0 Stripe verification

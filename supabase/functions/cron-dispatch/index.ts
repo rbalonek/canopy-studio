@@ -64,6 +64,13 @@ async function dispatch(task: string): Promise<void> {
     case 'posts_due':
       await postsDue();
       return;
+    case 'billing_cycle': {
+      // Postpaid invoicing lives in its own function (Stripe REST calls);
+      // internal-secret hand-off like run-job.
+      const resp = await invokeInternal('billing-cycle', {});
+      if (!resp.ok) console.error(`[cron-dispatch] billing-cycle returned ${resp.status}`);
+      return;
+    }
     default:
       console.error(`[cron-dispatch] unknown task: ${task}`);
   }

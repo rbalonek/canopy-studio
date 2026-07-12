@@ -6,6 +6,7 @@ import { useWorkspace } from '../workspace/WorkspaceProvider';
 import { AccountTab } from './settings/AccountTab';
 import { AiSettingsTab } from './settings/AiSettingsTab';
 import { ApiKeysPanel } from './settings/ApiKeysPanel';
+import { BillingPanel } from './settings/BillingPanel';
 import { ConnectorsPanel } from './settings/ConnectorsPanel';
 import { SkillsTab } from './settings/SkillsTab';
 import { WorkspaceTab } from './settings/WorkspaceTab';
@@ -77,6 +78,8 @@ export function Settings() {
             <SkillsTab />
           ) : tab === 'api' ? (
             <ApiKeysPanel />
+          ) : tab === 'billing' ? (
+            <BillingPanel />
           ) : (
             <Empty title={`${tab} — wireframe`} body="Form-based settings panel following shell conventions." />
           )}

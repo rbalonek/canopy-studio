@@ -16,6 +16,7 @@ import {
 } from '../_shared/auth.ts';
 import { isKnownJobType, settingsTaskFor } from '../_shared/ai/taskSpecs.ts';
 import { handoffToRunJob, loadTaskSettings, totalStepsFor } from '../_shared/ai/orchestrator.ts';
+import { billingBlockReason } from '../_shared/ai/usage.ts';
 
 interface EnqueueRequest {
   type: string;
@@ -54,6 +55,12 @@ Deno.serve(async (req) => {
     }
 
     const service = serviceClient();
+
+    // Billing gate: 402 with a human message the UI unwraps via
+    // error.context. Workspaces without billing enabled are never blocked.
+    const blocked = await billingBlockReason(service, workspaceId);
+    if (blocked) return json({ ok: false, error: blocked }, 402);
+
     const settings = await loadTaskSettings(service, workspaceId, settingsTaskFor(body.type));
 
     const { data: jobRow, error: insertErr } = await service

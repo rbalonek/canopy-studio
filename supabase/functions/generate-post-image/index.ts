@@ -18,6 +18,7 @@
 import { CORS, json } from '../_shared/cors.ts';
 import { authenticate, serviceClient } from '../_shared/auth.ts';
 import { loadWorkspaceKeys } from '../_shared/ai/orchestrator.ts';
+import { billingBlockReason, recordImageUsage } from '../_shared/ai/usage.ts';
 
 interface GenerateRequest {
   content_post_id: string;
@@ -60,6 +61,10 @@ Deno.serve(async (req) => {
 
     const service = serviceClient();
 
+    // Billing gate — same 402 semantics as enqueue-job.
+    const blocked = await billingBlockReason(service, post.workspace_id as string);
+    if (blocked) return json({ ok: false, error: blocked }, 402);
+
     // Which provider/model: the image_generation ai_settings row; xAI default.
     const { data: settings } = await service
       .from('ai_settings')
@@ -82,6 +87,14 @@ Deno.serve(async (req) => {
       provider === 'openai'
         ? await openaiImage(prompt, model, byoKey)
         : await xaiImage(prompt, model, byoKey);
+
+    // Meter it (this function recorded nothing before — a billing leak).
+    await recordImageUsage(service, {
+      workspaceId: post.workspace_id as string,
+      provider,
+      model,
+      keySource: byoKey ? 'workspace' : 'platform',
+    });
 
     // Store in the public client-assets bucket under the post's client, so
     // the URL renders app-wide and can be handed to the Meta publisher.

@@ -410,6 +410,12 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 enabled = true
 verify_jwt = false
 
+# stripe-webhook is invoked only by Stripe's servers — no JWT possible.
+# The real gate is the Stripe-Signature HMAC check in code (400 otherwise).
+[functions.stripe-webhook]
+enabled = true
+verify_jwt = false
+
 [functions.meta-refresh-client]
 enabled = true
 verify_jwt = true
