@@ -3,6 +3,7 @@ import { supabase } from '../../auth/supabaseClient';
 import type { Mode } from '../../routes';
 import { useAppState } from '../../shell/AppState';
 import { useWorkspace } from '../../workspace/WorkspaceProvider';
+import { ProfileDocEditor } from './ProfileDocEditor';
 import { inputStyle } from './shared';
 
 /** Workspace settings: rename + agency/business mode. Owner-only — RLS
@@ -59,6 +60,7 @@ export function WorkspaceTab() {
   }
 
   return (
+    <div className="stack gap-16">
     <form onSubmit={onSave} className="card card-pad stack gap-10">
       <span className="h2">Workspace</span>
       <label className="stack gap-4">
@@ -115,5 +117,7 @@ export function WorkspaceTab() {
         </button>
       </div>
     </form>
+    <ProfileDocEditor />
+    </div>
   );
 }

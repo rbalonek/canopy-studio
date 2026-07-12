@@ -112,8 +112,33 @@ as standing instructions that apply on top of everything above.
 ${blocks}`;
 }
 
-export function systemPromptWithSkills(skills: Skill[]): string {
-  return SYSTEM_PROMPT + skillsBlock(skills);
+export function systemPromptWithSkills(skills: Skill[], profiles: ProfileDoc[] = []): string {
+  return SYSTEM_PROMPT + skillsBlock(skills) + profileBlock(profiles);
+}
+
+export interface ProfileDoc {
+  scope: 'agency' | 'client';
+  content: string;
+}
+
+/** DB-backed profile docs (profile_docs table) → system-prompt suffix.
+ * One CLAUDE.md-style document per entity: the agency/workspace doc rides
+ * on every task, the client doc only on tasks scoped to that client. */
+export function profileBlock(profiles: ProfileDoc[]): string {
+  const withContent = profiles.filter((p) => p.content.trim().length > 0);
+  if (!withContent.length) return '';
+  const blocks = withContent
+    .map(
+      (p) =>
+        `## ${p.scope === 'agency' ? 'AGENCY PROFILE (applies to all clients)' : 'CLIENT PROFILE'}\n${p.content.trim()}`,
+    )
+    .join('\n\n');
+  return `\n\n# WORKSPACE PROFILES
+Standing background about this agency and client, maintained by the team.
+Treat it as authoritative context — it outranks assumptions you might make
+from scraped content, but not the task's explicit instructions.
+
+${blocks}`;
 }
 
 // Helper to format dos and donts for prompts

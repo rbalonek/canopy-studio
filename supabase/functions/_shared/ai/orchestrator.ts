@@ -21,6 +21,7 @@ import {
 import {
   REFINEMENT_SYSTEM_PROMPT,
   REVIEW_SYSTEM_PROMPT,
+  type ProfileDoc,
   type Skill,
 } from './prompts.ts';
 import { recordUsage } from './usage.ts';
@@ -91,6 +92,30 @@ export async function loadSkills(
       return applies.length === 0 || applies.includes(task);
     })
     .map((s) => ({ name: s.name as string, content: s.content as string }));
+}
+
+/** Profile docs for prompt injection: the agency doc (client_id null)
+ * always applies; the client doc only when the job is client-scoped.
+ * Agency doc sorts first so the client doc can override it. */
+export async function loadProfiles(
+  service: ServiceClient,
+  workspaceId: string,
+  clientId?: string | null,
+): Promise<ProfileDoc[]> {
+  let q = service
+    .from('profile_docs')
+    .select('client_id, content')
+    .eq('workspace_id', workspaceId);
+  q = clientId ? q.or(`client_id.is.null,client_id.eq.${clientId}`) : q.is('client_id', null);
+  const { data } = await q;
+  if (!data) return [];
+  // deno-lint-ignore no-explicit-any
+  return (data as any[])
+    .map((p) => ({
+      scope: (p.client_id ? 'client' : 'agency') as ProfileDoc['scope'],
+      content: (p.content as string) ?? '',
+    }))
+    .sort((a, b) => (a.scope === b.scope ? 0 : a.scope === 'agency' ? -1 : 1));
 }
 
 export function totalStepsFor(mode: AiMode): number {

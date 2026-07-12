@@ -64,16 +64,17 @@ one-click Approve→Publish (ads always PAUSED; organic posts confirm-first).
 ## Phase 2 — Profile docs + BYO provider keys
 
 ### 2a. Per-client / per-agency profile docs
-- [ ] Migration `profile_docs` (one doc per entity: `client_id` null =
+- [x] Migration `profile_docs` (one doc per entity: `client_id` null =
       agency-level; `unique nulls not distinct (workspace_id, client_id)`;
       member-CRUD RLS like `skills`).
-- [ ] `_shared/ai/orchestrator.ts` `loadProfiles()` + `_shared/ai/prompts.ts`
-      `profileBlock()` (`## AGENCY PROFILE` / `## CLIENT PROFILE: <name>`);
-      append after `skillsBlock` in every `taskSpecs.ts` builder that loads
-      skills. Deploy: `enqueue-job`, `run-job`, `cron-dispatch`.
-- [ ] UI: ClientDetail "Profile" tab (markdown editor, Skills-editor style);
-      agency doc card in Settings → workspace. Provider methods in
-      `provider.ts` / `supabaseProvider.ts`.
+- [x] `_shared/ai/orchestrator.ts` `loadProfiles()` + `_shared/ai/prompts.ts`
+      `profileBlock()` (`## AGENCY PROFILE` / `## CLIENT PROFILE`); appended
+      after `skillsBlock` in every `taskSpecs.ts` builder that loads skills
+      (all 10 + the shared generation scope). Deploy: `enqueue-job`,
+      `run-job`, `cron-dispatch`.
+- [x] UI: ClientDetail "Profile" tab + agency doc card in Settings →
+      workspace, both via the shared `ProfileDocEditor` (direct-supabase
+      CRUD like SkillsTab — no provider changes needed).
 
 ### 2b. BYO API keys
 - [ ] Migration `workspace_api_keys` (`(workspace_id, provider)` PK,
