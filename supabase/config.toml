@@ -416,6 +416,19 @@ verify_jwt = false
 enabled = true
 verify_jwt = false
 
+# meta-oauth's GET is the browser arriving back from facebook.com (no JWT);
+# the gate is the single-use, 10-minute oauth_states row. The POST start
+# path authenticates in code.
+[functions.meta-oauth]
+enabled = true
+verify_jwt = false
+
+# meta-data-deletion is POSTed by Meta's servers; the gate is the
+# signed_request HMAC verified with the app secret.
+[functions.meta-data-deletion]
+enabled = true
+verify_jwt = false
+
 [functions.meta-refresh-client]
 enabled = true
 verify_jwt = true

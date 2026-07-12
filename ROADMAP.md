@@ -129,22 +129,28 @@ flat ~$0.20; BYO-key events 10% of rate-card, no floor).
 Tokens land in existing credential tables; `resolveAccessToken` untouched;
 manual System-User paste stays as an "Advanced" option.
 
-- [ ] Migration `meta_oauth`: `oauth_states` (service-role only, single-use,
-      `provider` column reused by Google), `expires_at` on
-      `workspace_meta_credentials` + `client_meta_credentials`,
-      `deletion_requests` table.
-- [ ] Edge Function `meta-oauth`: POST start (authed/owner) → FB Login for
-      Business dialog URL; GET callback (`verify_jwt=false`, state-row gate) →
-      long-lived token exchange → upsert credentials → 302 back to Settings.
-- [ ] Edge Function `meta-data-deletion` (`verify_jwt=false`, `signed_request`
-      verification) → `deletion_requests` + confirmation URL/code.
-- [ ] UI: "Connect with Facebook" primary action in `WorkspaceMetaPanel` +
-      `AdAccountsTab`; token expiry display + ≤7-day reconnect warning;
-      cron-dispatch expiry check → connector notification.
-- [ ] Facebook sign-in: add `'facebook'` to `OAuthProvider` union
-      (`src/auth/AuthProvider.tsx`) + Login button; enable provider in
-      Supabase dashboard.
-- [ ] `config.toml`: `verify_jwt=false` for `meta-oauth`, `meta-data-deletion`.
+- [x] Migration `meta_oauth`: `oauth_states` (service-role only, single-use,
+      `provider` column reused by Google, `return_to` for the redirect
+      home), `expires_at` on `workspace_meta_credentials` +
+      `client_meta_credentials`, `deletion_requests` table.
+- [x] Edge Function `meta-oauth`: POST start (authed/owner, per-client via
+      `client_id`) → FB Login for Business dialog URL (uses
+      `FB_LOGIN_CONFIG_ID` when set, scope-list fallback); GET callback
+      (`verify_jwt=false`, claim-and-delete state row, 10-min TTL) →
+      long-lived token exchange → upsert into the existing credential
+      tables → 302 back with `?meta=connected|error`.
+- [x] Edge Function `meta-data-deletion` (`verify_jwt=false`,
+      `signed_request` HMAC verification) → `deletion_requests` +
+      confirmation URL/code response.
+- [x] UI: "Connect with Facebook" in `WorkspaceMetaPanel` (+ callback
+      result banner + ≤7-day expiry warning) and per-client in
+      `AdAccountsTab`'s override panel; manual token paste demoted to the
+      advanced path. Daily cron warns owners via connectors when an OAuth
+      token is ≤7 days from expiry.
+- [x] `'facebook'` added to the `OAuthProvider` union; the Login button
+      ships when the provider is enabled in the Supabase dashboard (a
+      listed-but-disabled provider just errors on click).
+- [x] `config.toml`: `verify_jwt=false` for `meta-oauth`, `meta-data-deletion`.
 - [ ] Manual: Meta app redirect URI + Data Deletion Callback URL + legal URLs.
       Status: blocked on Phase 1
 - [ ] Manual: **App Review** — `pages_manage_posts`, `pages_read_engagement`,

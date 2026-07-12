@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { supabase } from '../../auth/supabaseClient';
 import { Icon } from '../../components/Icon';
+import { invokeErrorText } from '../../lib/invokeError';
+import { useWorkspace } from '../../workspace/WorkspaceProvider';
 import { CampaignsTable } from '../campaigns/CampaignsTable';
 
 /**
@@ -191,6 +193,32 @@ function MetaAppOverridePanel({ clientId }: { clientId: string }) {
     refresh();
   }
 
+  const [connecting, setConnecting] = useState(false);
+  const workspace = useWorkspace();
+
+  /** OAuth path for the override: the long-lived token lands in
+   * client_meta_credentials via the meta-oauth callback (state carries
+   * client_id), so this client runs on its own Facebook connection. */
+  async function connectWithFacebook() {
+    if (!supabase || !workspace) return;
+    setConnecting(true);
+    setErr(null);
+    const { data, error } = await supabase.functions.invoke('meta-oauth', {
+      body: {
+        action: 'start',
+        workspace_id: workspace.id,
+        client_id: clientId,
+        return_to: window.location.href.split('?')[0],
+      },
+    });
+    setConnecting(false);
+    if (error || !data?.ok || !data?.url) {
+      setErr(await invokeErrorText(data, error));
+      return;
+    }
+    window.location.href = data.url as string;
+  }
+
   if (override === undefined) return null;
 
   const showForm = editing || (!override && editing);
@@ -225,18 +253,23 @@ function MetaAppOverridePanel({ clientId }: { clientId: string }) {
             </button>
           )}
           {!editing && (
-            <button
-              className="btn sm"
-              onClick={() => {
-                setLabel(override?.label ?? '');
-                setAppId(override?.appId ?? '');
-                setToken('');
-                setErr(null);
-                setEditing(true);
-              }}
-            >
-              <Icon name="link" size={12} /> {override?.hasToken ? 'Update' : 'Add override'}
-            </button>
+            <>
+              <button className="btn sm" onClick={connectWithFacebook} disabled={connecting}>
+                {connecting ? 'Redirecting…' : 'Connect with Facebook'}
+              </button>
+              <button
+                className="btn sm"
+                onClick={() => {
+                  setLabel(override?.label ?? '');
+                  setAppId(override?.appId ?? '');
+                  setToken('');
+                  setErr(null);
+                  setEditing(true);
+                }}
+              >
+                <Icon name="link" size={12} /> {override?.hasToken ? 'Update' : 'Add override'}
+              </button>
+            </>
           )}
         </div>
       </div>
