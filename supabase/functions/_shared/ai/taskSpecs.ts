@@ -9,12 +9,13 @@ import type { ServiceClient } from '../auth.ts';
 import { notifyWorkspace, sendEmail, sendSlack } from '../notify.ts';
 import { landingPageSection } from '../scrape.ts';
 import type { OrchestratedPromptSpec } from './orchestrator.ts';
-import { loadSkills } from './orchestrator.ts';
+import { loadProfiles, loadSkills } from './orchestrator.ts';
 import {
   buildCreativeDirectionsPrompt,
   buildUserPrompt,
   buildUserPromptWithDirection,
   formatClientContext,
+  profileBlock,
   skillsBlock,
   systemPromptWithSkills,
   type BrandContext,
@@ -156,7 +157,7 @@ async function loadGenerationScope(
   if (!job.client_id) throw new Error(`${task} requires a client_id`);
   const input = job.input ?? {};
 
-  const [clientCtx, locationCtx, skills, landing, scraped] = await Promise.all([
+  const [clientCtx, locationCtx, skills, landing, scraped, profiles] = await Promise.all([
     loadBrandContext(service, job.client_id),
     input.location_id
       ? loadLocationContext(service, input.location_id as string)
@@ -164,6 +165,7 @@ async function loadGenerationScope(
     loadSkills(service, job.workspace_id, task),
     landingPageSection(input.landing_page_url as string | undefined),
     scrapedContentSection(service, job.client_id, input.location_id as string | undefined),
+    loadProfiles(service, job.workspace_id, job.client_id),
   ]);
 
   // Location-scoped: client brand is the parent, location is the child.
@@ -181,7 +183,13 @@ async function loadGenerationScope(
 
   const sourceContent = [landing, scraped].filter(Boolean).join('\n\n');
 
-  return { client, parent, campaign, sourceContent, system: systemPromptWithSkills(skills) };
+  return {
+    client,
+    parent,
+    campaign,
+    sourceContent,
+    system: systemPromptWithSkills(skills, profiles),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -279,17 +287,18 @@ const expandContent: SpecBuilder = async (service, job) => {
   const count = Math.min(Math.max(Number(input.count) || 10, 1), 50);
   const suggestion = (input.suggestion as string | undefined) ?? '';
 
-  const [clientCtx, skills] = await Promise.all([
+  const [clientCtx, skills, profiles] = await Promise.all([
     job.client_id
       ? loadBrandContext(service, job.client_id)
       : Promise.resolve<BrandContext>({ name: 'the client' }),
     loadSkills(service, job.workspace_id, 'expand_content'),
+    loadProfiles(service, job.workspace_id, job.client_id),
   ]);
 
   const existingLower = new Set(existing.map((s) => s.trim().toLowerCase()));
 
   return {
-    system: systemPromptWithSkills(skills),
+    system: systemPromptWithSkills(skills, profiles),
     user: `${formatClientContext(clientCtx)}
 
 ## TASK
@@ -342,15 +351,16 @@ const regenerateSingle: SpecBuilder = async (service, job) => {
   const currentValue = (input.current_value as string) ?? '';
   const instruction = (input.instruction as string | undefined) ?? '';
 
-  const [clientCtx, skills] = await Promise.all([
+  const [clientCtx, skills, profiles] = await Promise.all([
     job.client_id
       ? loadBrandContext(service, job.client_id)
       : Promise.resolve<BrandContext>({ name: 'the client' }),
     loadSkills(service, job.workspace_id, 'regenerate_single'),
+    loadProfiles(service, job.workspace_id, job.client_id),
   ]);
 
   return {
-    system: systemPromptWithSkills(skills),
+    system: systemPromptWithSkills(skills, profiles),
     user: `${formatClientContext(clientCtx)}
 
 ## TASK
@@ -380,7 +390,7 @@ const websiteAnalysis: SpecBuilder = async (service, job) => {
   if (!job.client_id) throw new Error('website_analysis requires a client_id');
   const clientId = job.client_id;
 
-  const [{ data: pages }, { data: domainRow }, skills, { data: clientRow }] = await Promise.all([
+  const [{ data: pages }, { data: domainRow }, skills, { data: clientRow }, profiles] = await Promise.all([
     service
       .from('scraped_pages')
       .select('url, title, content')
@@ -400,6 +410,7 @@ const websiteAnalysis: SpecBuilder = async (service, job) => {
       .maybeSingle(),
     loadSkills(service, job.workspace_id, 'website_analysis'),
     service.from('clients').select('name, website').eq('id', clientId).maybeSingle(),
+    loadProfiles(service, job.workspace_id, clientId),
   ]);
 
   if (!pages?.length) {
@@ -426,7 +437,8 @@ const websiteAnalysis: SpecBuilder = async (service, job) => {
   return {
     system:
       'You are a brand analyst that extracts brand information from websites. Always respond with valid JSON.' +
-      skillsBlock(skills),
+      skillsBlock(skills) +
+      profileBlock(profiles),
     user: buildWebsiteAnalysisPrompt(websiteContent, url),
     reviewInstructions:
       'Check every field is grounded in the actual website content (no invented facts), the customer avatars are specific, and dos/donts are actionable single-line rules separated by newlines.',
@@ -554,7 +566,7 @@ const competitorAnalysis: SpecBuilder = async (service, job) => {
   const competitorId = job.input?.competitor_id as string | undefined;
   if (!competitorId) throw new Error('competitor_analysis requires input.competitor_id');
 
-  const [{ data: competitor }, clientCtx, { data: compPages }, skills] = await Promise.all([
+  const [{ data: competitor }, clientCtx, { data: compPages }, skills, profiles] = await Promise.all([
     service
       .from('competitors')
       .select('id, domain, name')
@@ -569,6 +581,7 @@ const competitorAnalysis: SpecBuilder = async (service, job) => {
       .order('word_count', { ascending: false })
       .limit(8),
     loadSkills(service, job.workspace_id, 'competitor_analysis'),
+    loadProfiles(service, job.workspace_id, clientId),
   ]);
 
   if (!competitor) throw new Error('Competitor not found for this client');
@@ -589,7 +602,8 @@ const competitorAnalysis: SpecBuilder = async (service, job) => {
   return {
     system:
       'You are a competitive-intelligence strategist for advertising teams. You compare a client brand against a competitor using only evidence from the provided content. Always respond with valid JSON.' +
-      skillsBlock(skills),
+      skillsBlock(skills) +
+      profileBlock(profiles),
     user: `## OUR CLIENT (the brand we work for)
 ${formatClientContext(clientCtx)}
 
@@ -666,7 +680,7 @@ const accountAnalysis: SpecBuilder = async (service, job) => {
   const clientId = job.client_id;
 
   const since = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
-  const [clientCtx, { data: clientRow }, { data: campaigns }, { data: history }, competitorsRes, skills] =
+  const [clientCtx, { data: clientRow }, { data: campaigns }, { data: history }, competitorsRes, skills, profiles] =
     await Promise.all([
       loadBrandContext(service, clientId),
       service.from('clients').select('name').eq('id', clientId).maybeSingle(),
@@ -688,6 +702,7 @@ const accountAnalysis: SpecBuilder = async (service, job) => {
         .eq('client_id', clientId)
         .not('analysis', 'is', null),
       loadSkills(service, job.workspace_id, 'account_analysis'),
+      loadProfiles(service, job.workspace_id, clientId),
     ]);
 
   const activeCampaigns = (campaigns ?? []).filter(
@@ -711,7 +726,8 @@ const accountAnalysis: SpecBuilder = async (service, job) => {
   return {
     system:
       'You are an expert digital marketing analyst specializing in META Ads optimization. Always respond with valid JSON.' +
-      skillsBlock(skills),
+      skillsBlock(skills) +
+      profileBlock(profiles),
     user: `Analyze the following ad performance data for the client "${clientCtx.name}" and provide actionable recommendations:
 
 ${JSON.stringify(adData, null, 2)}
@@ -873,7 +889,7 @@ const sendReport: SpecBuilder = async (service, job) => {
   const startStr = periodStart.toISOString().slice(0, 10);
   const endStr = periodEnd.toISOString().slice(0, 10);
 
-  const [{ data: clientRow }, { data: metrics }, { data: campaigns }, skills] = await Promise.all([
+  const [{ data: clientRow }, { data: metrics }, { data: campaigns }, skills, profiles] = await Promise.all([
     service.from('clients').select('name').eq('id', clientId).maybeSingle(),
     service
       .from('campaign_metrics_daily')
@@ -883,6 +899,7 @@ const sendReport: SpecBuilder = async (service, job) => {
       .lte('date', endStr),
     service.from('campaigns').select('id, name, strategy').eq('client_id', clientId),
     loadSkills(service, job.workspace_id, 'report_summary'),
+    loadProfiles(service, job.workspace_id, clientId),
   ]);
 
   const clientName = (clientRow?.name as string) ?? 'Client';
@@ -935,7 +952,8 @@ const sendReport: SpecBuilder = async (service, job) => {
   return {
     system:
       'You are a marketing analyst writing a short, client-friendly performance report. Plain language, no jargon, no invented numbers — only what is in the data. Always respond with valid JSON.' +
-      skillsBlock(skills),
+      skillsBlock(skills) +
+      profileBlock(profiles),
     user: `Write the narrative for a ${cadence} ad performance report.
 
 ## CLIENT
@@ -1098,7 +1116,7 @@ const locationDetection: SpecBuilder = async (service, job) => {
   if (!job.client_id) throw new Error('location_detection requires a client_id');
   const clientId = job.client_id;
 
-  const [{ data: domainRow }, { data: clientRow }, { data: existingLocs }, skills] =
+  const [{ data: domainRow }, { data: clientRow }, { data: existingLocs }, skills, profiles] =
     await Promise.all([
       service
         .from('scraped_domains')
@@ -1111,6 +1129,7 @@ const locationDetection: SpecBuilder = async (service, job) => {
       service.from('clients').select('name, website').eq('id', clientId).maybeSingle(),
       service.from('locations').select('id, name, url').eq('client_id', clientId),
       loadSkills(service, job.workspace_id, 'location_detection'),
+      loadProfiles(service, job.workspace_id, clientId),
     ]);
 
   const navLinks: Array<{ url: string; text: string }> = Array.isArray(domainRow?.nav_links)
@@ -1140,7 +1159,8 @@ const locationDetection: SpecBuilder = async (service, job) => {
   return {
     system:
       'You are a careful website-structure analyst for a marketing platform. You classify URLs strictly from the evidence provided — never invent URLs. Always respond with valid JSON.' +
-      skillsBlock(skills),
+      skillsBlock(skills) +
+      profileBlock(profiles),
     user: `## BUSINESS
 ${clientName} — website domain: ${domain}
 
@@ -1301,7 +1321,7 @@ const contentPlan: SpecBuilder = async (service, job) => {
   const wantFb = channels.length === 0 || channels.includes('facebook');
   const wantIg = channels.length === 0 || channels.includes('instagram');
 
-  const [clientCtx, locationCtx, skills, scraped, landing] = await Promise.all([
+  const [clientCtx, locationCtx, skills, scraped, landing, profiles] = await Promise.all([
     loadBrandContext(service, job.client_id),
     input.location_id
       ? loadLocationContext(service, input.location_id as string)
@@ -1311,6 +1331,7 @@ const contentPlan: SpecBuilder = async (service, job) => {
     // Optional URL to build the content around (a blog post, an offer
     // page) — fetched live, same as the Ad Studio landing page.
     landingPageSection(input.source_url as string | undefined),
+    loadProfiles(service, job.workspace_id, job.client_id),
   ]);
   const client = locationCtx ?? clientCtx;
   const parent = locationCtx ? clientCtx : null;
@@ -1334,7 +1355,8 @@ const contentPlan: SpecBuilder = async (service, job) => {
   return {
     system:
       'You are a senior social media strategist and copywriter creating organic Facebook/Instagram content calendars. Always respond with valid JSON.' +
-      skillsBlock(skills),
+      skillsBlock(skills) +
+      profileBlock(profiles),
     user: `${formatClientContext(client)}
 ${parent ? `\n## PARENT BRAND\n${formatClientContext(parent)}\n` : ''}
 ## OBJECTIVE FOR THIS CONTENT PLAN
@@ -1459,11 +1481,14 @@ Return valid JSON:
  * (settings lookup, skills injection, collaboration chaining, JSON
  * parsing, usage rows) with a trivial marketing prompt. */
 const testPrompt: SpecBuilder = async (service, job) => {
-  const skills = await loadSkills(service, job.workspace_id, 'test_prompt');
+  const [skills, profiles] = await Promise.all([
+    loadSkills(service, job.workspace_id, 'test_prompt'),
+    loadProfiles(service, job.workspace_id, job.client_id),
+  ]);
   const subject = (job.input?.prompt as string | undefined) ||
     'a neighborhood coffee shop launching oat-milk lattes';
   return {
-    system: systemPromptWithSkills(skills),
+    system: systemPromptWithSkills(skills, profiles),
     user: `Write one punchy ad headline (max 30 characters) and one supporting sentence for: ${subject}.
 
 Return valid JSON: { "headline": "...", "sentence": "..." }`,

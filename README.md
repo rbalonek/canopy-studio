@@ -5,6 +5,16 @@ audience modes (Agency / Business) drive vocabulary throughout. The repo
 hosts the **app** (this `.app` domain product); the marketing site lives
 in a separate project on `.com`.
 
+**Live today:** Meta campaign reporting (multi-period + historical
+backfill), the AI pipeline (ad copy, creative directions, analyses,
+reports, content calendars) with per-workspace provider settings, skills,
+and profile docs, organic FB/IG publishing + scheduling, an Approvals
+inbox with one-click publish (ads always created paused), a Stripe credit
+ledger awaiting dashboard setup, Meta/Google OAuth connect flows awaiting
+app credentials, and public legal pages. [`ROADMAP.md`](ROADMAP.md) tracks
+what's done and what's still in flight (external reviews, Google Ads
+activation).
+
 ## Stack
 
 - Vite + React 18 + TypeScript + React Router v6
@@ -21,19 +31,24 @@ supabase start                     # one-time ~5-min image pull, then fast
 npm run dev                        # http://localhost:5173
 ```
 
-Hit `/` — redirects to `/dev`. The full design reference is browseable
-under `/dev/*` (Overview, Clients, Ad Studio, Brand Intelligence, etc).
+Hit `/` — login (or your workspace if signed in). The full design
+reference is browseable under `/dev/*` (Overview, Clients, Ad Studio,
+Brand Intelligence, etc).
 
 ## Routes
 
-- **`/dev/*`** — design reference / wireframe mode. No auth. Reads through
-  the `DataProvider` interface — currently the local Supabase by default,
-  falls back to in-memory mock for any methods whose tables haven't
-  been migrated yet.
-- **`/`** — reserved for the live, auth-gated product. Currently just
-  redirects to `/dev`. Will become: login → onboarding → `/app/*`.
-- **`/app/*`** — (not yet) the live product, mounting the same shell as
-  `/dev` but with auth and workspace-scoped reads.
+- **`/`** — live gate: login when signed out; when authed, redirects to
+  `/onboard` (no workspace yet) or `/app/<slug>` (first workspace).
+- **`/app/:slug/*`** — the live product: auth-gated, workspace-scoped,
+  Supabase provider, RLS does the tenant isolation. The sidebar lists
+  only routes flagged `live` in `src/routes.ts`.
+- **`/dev/*`** — design reference / wireframe mode. No auth, mock
+  provider. Every wireframe view stays browsable here even before (or
+  without) going live.
+- **`/legal/*`** — public legal pages (privacy, terms, data deletion).
+  No auth — Meta/Google app review require login-free URLs.
+
+See [`ROADMAP.md`](ROADMAP.md) for what's live vs. still being wired up.
 
 ## Data layer
 
@@ -152,8 +167,10 @@ tab on every client) covers the full loop:
 - **Per-platform captions** — separate FB and IG copy per post (they're
   independent API calls; IG gets hooks + hashtags, FB stays link-friendly).
 - **Imagery** — per-post image briefs; "Generate image" renders them via
-  the configured provider (xAI Grok by default, OpenAI selectable —
-  Settings → AI). Image / video / link media types per post.
+  the configured provider (xAI `grok-imagine-image` by default —
+  `-quality` variant and OpenAI selectable in Settings → AI; the model
+  field is free text, so provider renames never need a deploy).
+  Image / video / link media types per post.
 - **Post now** — instant live publish to the selected channels, gated to
   approved posts behind a confirm.
 - **Schedule** — Facebook posts are scheduled *natively in Meta* (they

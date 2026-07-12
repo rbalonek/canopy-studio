@@ -28,6 +28,8 @@ const PRIORITY_PILL: Record<SuggestionRow['priority'], string> = {
   low: 'gray',
 };
 
+const COLLAPSE_KEY = 'canopy.overview.suggestions.collapsed';
+
 export function SuggestionsPanel() {
   const workspace = useWorkspace();
   const navigate = useNavigate();
@@ -35,6 +37,14 @@ export function SuggestionsPanel() {
   const [showAll, setShowAll] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === '1');
+
+  function toggleCollapsed() {
+    setCollapsed((v) => {
+      localStorage.setItem(COLLAPSE_KEY, v ? '0' : '1');
+      return !v;
+    });
+  }
 
   async function refresh() {
     if (!supabase || !workspace) return;
@@ -113,9 +123,28 @@ export function SuggestionsPanel() {
 
   return (
     <div className="card" style={{ marginBottom: 16 }}>
-      <div className="card-pad row between" style={{ borderBottom: '1px solid var(--border)' }}>
-        <div className="stack gap-2">
+      <div
+        className="card-pad row between"
+        style={{ borderBottom: collapsed ? 0 : '1px solid var(--border)' }}
+      >
+        <div
+          className="stack gap-2"
+          style={{ cursor: 'pointer', flex: 1 }}
+          onClick={toggleCollapsed}
+          title={collapsed ? 'Show suggestions' : 'Hide suggestions'}
+        >
           <div className="row gap-8">
+            <span
+              style={{
+                display: 'inline-block',
+                transition: 'transform 0.15s',
+                transform: collapsed ? 'rotate(-90deg)' : 'none',
+                fontSize: 11,
+                color: 'var(--fg-2)',
+              }}
+            >
+              ▼
+            </span>
             <Icon name="sparkles" size={14} />
             <span className="h2">AI suggestions</span>
             {rows.length > 0 && (
@@ -124,16 +153,20 @@ export function SuggestionsPanel() {
               </span>
             )}
           </div>
-          <span className="meta" style={{ fontSize: 11 }}>
-            Weekly account analysis (strategy-aware: lead gen judged on CPL, warm-ups on
-            engagement, sales on ROAS) plus competitor context.
-          </span>
+          {!collapsed && (
+            <span className="meta" style={{ fontSize: 11 }}>
+              Weekly account analysis (strategy-aware: lead gen judged on CPL, warm-ups on
+              engagement, sales on ROAS) plus competitor context.
+            </span>
+          )}
         </div>
         <button className="btn ai sm" onClick={analyzeNow} disabled={analyzing}>
           <Icon name="sparkles" size={11} /> {analyzing ? 'Queuing…' : 'Analyze now'}
         </button>
       </div>
 
+      {collapsed ? null : (
+        <>
       {note && (
         <div className="card-pad meta" style={{ fontSize: 12, borderBottom: '1px solid var(--border)' }}>
           {note}
@@ -185,8 +218,12 @@ export function SuggestionsPanel() {
               <Icon name="sparkles" size={11} /> Draft ad
             </button>
             {s.status === 'new' && (
-              <button className="btn ghost sm" onClick={() => setStatus(s.id, 'acknowledged')}>
-                Ack
+              <button
+                className="btn ghost sm"
+                title="Keep it in the list (dimmed) as seen — for suggestions you're aware of but not acting on yet"
+                onClick={() => setStatus(s.id, 'acknowledged')}
+              >
+                Mark seen
               </button>
             )}
             <button className="btn ghost sm" onClick={() => setStatus(s.id, 'dismissed')}>
@@ -202,6 +239,8 @@ export function SuggestionsPanel() {
             {showAll ? 'Show fewer' : `Show all ${rows.length}`}
           </button>
         </div>
+      )}
+        </>
       )}
     </div>
   );

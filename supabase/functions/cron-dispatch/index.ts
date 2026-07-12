@@ -20,6 +20,7 @@
 import { CORS, json } from '../_shared/cors.ts';
 import { serviceClient, type ServiceClient } from '../_shared/auth.ts';
 import { invokeInternal, isInternalCall } from '../_shared/internal.ts';
+import { notifyWorkspace } from '../_shared/notify.ts';
 import { handoffToRunJob, loadTaskSettings, totalStepsFor } from '../_shared/ai/orchestrator.ts';
 import { settingsTaskFor } from '../_shared/ai/taskSpecs.ts';
 
@@ -64,6 +65,13 @@ async function dispatch(task: string): Promise<void> {
     case 'posts_due':
       await postsDue();
       return;
+    case 'billing_cycle': {
+      // Postpaid invoicing lives in its own function (Stripe REST calls);
+      // internal-secret hand-off like run-job.
+      const resp = await invokeInternal('billing-cycle', {});
+      if (!resp.ok) console.error(`[cron-dispatch] billing-cycle returned ${resp.status}`);
+      return;
+    }
     default:
       console.error(`[cron-dispatch] unknown task: ${task}`);
   }
@@ -148,6 +156,60 @@ async function refreshAll(): Promise<void> {
       console.log(`[cron-dispatch] refreshed ${clientId}: ${body.slice(0, 200)}`);
     }
   });
+
+  // Google Ads reporting: clients with a configured customer id (client- or
+  // location-level) refresh on the same nightly cadence.
+  const [gClientRes, gLocRes] = await Promise.all([
+    service.from('clients').select('id').not('google_customer_id', 'is', null),
+    service.from('locations').select('client_id').not('google_customer_id', 'is', null),
+  ]);
+  const googleClients = new Set<string>();
+  for (const row of (gClientRes.data ?? []) as any[]) googleClients.add(row.id as string);
+  for (const row of (gLocRes.data ?? []) as any[]) googleClients.add(row.client_id as string);
+  if (googleClients.size) {
+    console.log(`[cron-dispatch] google refresh: ${googleClients.size} client(s)`);
+    await runWithConcurrency(Array.from(googleClients), CONCURRENCY, async (clientId) => {
+      const resp = await invokeInternal('google-ads-refresh', { client_id: clientId });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => '');
+        console.error(`[cron-dispatch] google refresh ${clientId} failed (${resp.status}): ${body.slice(0, 300)}`);
+      }
+    });
+  }
+
+  await warnExpiringMetaTokens(service);
+}
+
+/** Rides on the daily refresh: OAuth-issued Meta tokens (expires_at set —
+ * System User tokens have none) get a connector ping once they're within
+ * 7 days of expiry, so the owner reconnects before publishing breaks. */
+async function warnExpiringMetaTokens(service: ServiceClient): Promise<void> {
+  const soon = new Date(Date.now() + 7 * 86_400_000).toISOString();
+  const { data } = await service
+    .from('workspace_meta_credentials')
+    .select('workspace_id, expires_at')
+    .not('expires_at', 'is', null)
+    .lt('expires_at', soon);
+  for (const row of (data ?? []) as any[]) {
+    const days = Math.max(
+      0,
+      Math.floor((new Date(row.expires_at as string).getTime() - Date.now()) / 86_400_000),
+    );
+    try {
+      await notifyWorkspace(service, {
+        workspaceId: row.workspace_id as string,
+        kind: 'meta_token_expiry',
+        subject: 'Facebook connection expiring',
+        text:
+          days <= 0
+            ? 'The Facebook token has expired — reconnect in Settings → Connections to keep refreshes and publishing working.'
+            : `The Facebook token expires in ${days} day(s). Reconnect in Settings → Connections to renew it.`,
+      });
+    } catch (e) {
+      console.error(`[cron-dispatch] expiry warning failed for ${row.workspace_id}:`, e);
+    }
+  }
+  if (data?.length) console.log(`[cron-dispatch] warned ${data.length} workspace(s) about expiring Meta tokens`);
 }
 
 /** Fires the report settings due today: daily always, weekly on Mondays,

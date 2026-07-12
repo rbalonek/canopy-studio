@@ -56,6 +56,9 @@ export type Norm = {
   roas: number;
   revenue: number;
   results: number;
+  /** Action type `results` resolved to (null when nothing matched) — feed to
+   * `resultUnit()` for a "56 purchases"-style label. */
+  resultsType: string | null;
   costPerResult: number;
   purchases: number;
   purchaseCost: number;
@@ -83,6 +86,33 @@ function ratio(numr: number, denom: number): number {
 function pick(actions: Record<string, number>, candidates: string[]): number {
   for (const k of candidates) if (actions[k] > 0) return actions[k];
   return 0;
+}
+/** Like `pick`, but returns the matching action type instead of the count. */
+function pickKey(actions: Record<string, number>, candidates: string[]): string | null {
+  for (const k of candidates) if (actions[k] > 0) return k;
+  return null;
+}
+
+// --- Campaign status filter (shared by the campaign tables) ----------------
+
+export type StatusFilter = 'active' | 'paused' | 'archived' | 'all';
+export const STATUS_FILTERS: { id: StatusFilter; label: string }[] = [
+  { id: 'active', label: 'Active' },
+  { id: 'paused', label: 'Paused' },
+  { id: 'archived', label: 'Archived' },
+  { id: 'all', label: 'All' },
+];
+export function matchesStatusFilter(status: string, f: StatusFilter): boolean {
+  switch (f) {
+    case 'active':
+      return status === 'ACTIVE';
+    case 'paused':
+      return status === 'PAUSED';
+    case 'archived':
+      return status === 'ARCHIVED' || status === 'DELETED';
+    case 'all':
+      return true;
+  }
 }
 
 const PURCHASE = ['omni_purchase', 'offsite_conversion.fb_pixel_purchase', 'purchase', 'onsite_web_purchase'];
@@ -118,10 +148,36 @@ const RESULT_PRIORITY = [
   'page_engagement',
   'video_view',
 ];
-function strategyResults(strategy: string | null | undefined, actions: Record<string, number>): number {
+function strategyResults(
+  strategy: string | null | undefined,
+  actions: Record<string, number>,
+): { value: number; type: string | null } {
   const exp = STRATEGY_EXPECTED[strategy ?? ''] ?? [];
-  const v = pick(actions, exp);
-  return v > 0 ? v : pick(actions, RESULT_PRIORITY);
+  const k = pickKey(actions, exp) ?? pickKey(actions, RESULT_PRIORITY);
+  return { value: k ? actions[k] : 0, type: k };
+}
+
+// Friendly plural unit per result action type, so views can say "56 purchases"
+// instead of a bare count whose meaning varies by row.
+const RESULT_UNIT: Record<string, string> = {
+  ...Object.fromEntries(PURCHASE.map((k) => [k, 'purchases'])),
+  ...Object.fromEntries(LEAD.map((k) => [k, 'leads'])),
+  ...Object.fromEntries(ATC.map((k) => [k, 'add-to-carts'])),
+  ...Object.fromEntries(ENGAGE.map((k) => [k, 'engagements'])),
+  post_reaction: 'engagements',
+  'offsite_conversion.fb_pixel_initiate_checkout': 'checkouts',
+  initiate_checkout: 'checkouts',
+  'offsite_conversion.fb_pixel_view_content': 'content views',
+  view_content: 'content views',
+  omni_view_content: 'content views',
+  landing_page_view: 'landing page views',
+  link_click: 'link clicks',
+  video_view: 'video views',
+};
+/** Unit label for a Norm's `resultsType` (null when results are 0/unknown). */
+export function resultUnit(type: string | null | undefined): string | null {
+  if (!type) return null;
+  return RESULT_UNIT[type] ?? prettyAction(type).toLowerCase();
 }
 
 /** Read a campaign's fields for a given period (falling back to the flat
@@ -179,7 +235,7 @@ export function normalizeCampaign(row: CampaignRow, period: Period = 'this_month
   const landingPageViews = pick(f.actions, ['landing_page_view']);
   const linkClicks = pick(f.actions, ['link_click']);
   const leads = pick(f.actions, LEAD);
-  const results = strategyResults(row.strategy, f.actions);
+  const { value: results, type: resultsType } = strategyResults(row.strategy, f.actions);
   return {
     spend: f.spend,
     impressions: f.impressions,
@@ -192,6 +248,7 @@ export function normalizeCampaign(row: CampaignRow, period: Period = 'this_month
     roas: f.roas,
     revenue: f.spend * f.roas,
     results,
+    resultsType,
     costPerResult: ratio(f.spend, results),
     purchases,
     purchaseCost: ratio(f.spend, purchases),
@@ -209,7 +266,14 @@ export function normalizeCampaign(row: CampaignRow, period: Period = 'this_month
 }
 
 /** Aggregate campaigns: additive fields (incl. the action map) sum; ratios and
- * costs are recomputed from the totals, never averaged. */
+ * costs are recomputed from the totals, never averaged.
+ *
+ * `results` is NOT the sum of per-campaign strategy results — that would add
+ * mixed units (purchases + engagements + …) when strategies differ within the
+ * group. It's resolved from the combined action map by conversion priority
+ * (purchases → leads → warm-up actions), so a client whose Engagement
+ * campaigns exist to boost its Sales campaigns rolls up to purchases, not
+ * engagements. When every campaign shares a strategy this equals the sum. */
 export function aggregate(rows: CampaignRow[], period: Period = 'this_month'): Norm {
   const norms = rows.map((r) => normalizeCampaign(r, period));
   const sum = (f: (m: Norm) => number) => norms.reduce((t, m) => t + f(m), 0);
@@ -221,7 +285,8 @@ export function aggregate(rows: CampaignRow[], period: Period = 'this_month'): N
   const clicks = sum((m) => m.clicks);
   const reach = sum((m) => m.reach);
   const revenue = sum((m) => m.revenue);
-  const results = sum((m) => m.results);
+  const resultsType = pickKey(actions, RESULT_PRIORITY);
+  const results = resultsType ? actions[resultsType] : sum((m) => m.results);
   const purchases = sum((m) => m.purchases);
   const landingPageViews = sum((m) => m.landingPageViews);
   const linkClicks = sum((m) => m.linkClicks);
@@ -238,6 +303,7 @@ export function aggregate(rows: CampaignRow[], period: Period = 'this_month'): N
     roas: ratio(revenue, spend),
     revenue,
     results,
+    resultsType,
     costPerResult: ratio(spend, results),
     purchases,
     purchaseCost: ratio(spend, purchases),
@@ -276,27 +342,32 @@ export type DailyRow = {
 /** Aggregate per-day rows into the same additive `Norm` the preset periods use,
  * so an arbitrary date range renders through the identical metric catalog.
  *
- * Additive fields (spend, impressions, clicks, revenue, the action map, and the
- * per-day strategy `results`) sum; ratios/costs recompute from the totals.
- * Reach/frequency aren't summable across days, so they're left at 0 (shown as
- * "—" by the views). */
+ * Additive fields (spend, impressions, clicks, revenue, the action map) sum;
+ * ratios/costs recompute from the totals. Reach/frequency aren't summable
+ * across days, so they're left at 0 (shown as "—" by the views).
+ *
+ * `results` resolves from the combined action map by conversion priority
+ * (same rule as `aggregate` — purchases trump warm-up actions), falling back
+ * to the summed per-day strategy results for old rows without an action map. */
 export function aggregateDaily(rows: DailyRow[]): Norm {
   let spend = 0;
   let impressions = 0;
   let clicks = 0;
   let revenue = 0;
-  let results = 0;
+  let summedResults = 0;
   const actions: Record<string, number> = {};
   for (const r of rows) {
     spend += nn(r.spend);
     impressions += nn(r.impressions);
     clicks += nn(r.clicks);
-    results += nn(r.results);
+    summedResults += nn(r.results);
     revenue += nn(r.metrics?.revenue);
     for (const [k, v] of Object.entries(r.metrics?.all_actions ?? {})) {
       actions[k] = (actions[k] ?? 0) + nn(v);
     }
   }
+  const resultsType = pickKey(actions, RESULT_PRIORITY);
+  const results = resultsType ? actions[resultsType] : summedResults;
   const purchases = pick(actions, PURCHASE);
   const landingPageViews = pick(actions, ['landing_page_view']);
   const linkClicks = pick(actions, ['link_click']);
@@ -313,6 +384,7 @@ export function aggregateDaily(rows: DailyRow[]): Norm {
     roas: ratio(revenue, spend),
     revenue,
     results,
+    resultsType,
     costPerResult: ratio(spend, results),
     purchases,
     purchaseCost: ratio(spend, purchases),

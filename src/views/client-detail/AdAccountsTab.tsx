@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { supabase } from '../../auth/supabaseClient';
 import { Icon } from '../../components/Icon';
+import { invokeErrorText } from '../../lib/invokeError';
+import { useWorkspace } from '../../workspace/WorkspaceProvider';
 import { CampaignsTable } from '../campaigns/CampaignsTable';
 
 /**
@@ -85,7 +87,125 @@ export function AdAccountsTab({ clientId }: { clientId: string }) {
       )}
       {connection && !editing && <PullPastData clientId={clientId} />}
       <MetaAppOverridePanel clientId={clientId} />
+      <GoogleAdsPanel clientId={clientId} />
       <CampaignsTable clientId={clientId} />
+    </div>
+  );
+}
+
+/**
+ * Per-client Google Ads reporting: which customer id this client pulls
+ * from (clients.google_customer_id — member-editable like the rest of the
+ * client row) + a manual refresh. The workspace-level connection (OAuth
+ * refresh token + MCC) lives in Settings → Connections.
+ */
+function GoogleAdsPanel({ clientId }: { clientId: string }) {
+  const [customerId, setCustomerId] = useState<string | null | undefined>(undefined);
+  const [draft, setDraft] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState<'save' | 'refresh' | null>(null);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!supabase) return setCustomerId(null);
+      const { data } = await supabase
+        .from('clients')
+        .select('google_customer_id')
+        .eq('id', clientId)
+        .maybeSingle();
+      if (cancelled) return;
+      const cid = (data?.google_customer_id as string | null) ?? null;
+      setCustomerId(cid);
+      setDraft(cid ?? '');
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId]);
+
+  if (customerId === undefined) return null;
+
+  async function save() {
+    if (!supabase) return;
+    setBusy('save');
+    setMsg(null);
+    const value = draft.replace(/[^0-9]/g, '') || null;
+    const { error } = await supabase
+      .from('clients')
+      .update({ google_customer_id: value })
+      .eq('id', clientId);
+    setBusy(null);
+    if (error) return setMsg({ ok: false, text: error.message });
+    setCustomerId(value);
+    setEditing(false);
+    setMsg({ ok: true, text: value ? 'Saved — nightly refresh includes Google Ads now.' : 'Removed.' });
+  }
+
+  async function refreshNow() {
+    if (!supabase) return;
+    setBusy('refresh');
+    setMsg(null);
+    const { data, error } = await supabase.functions.invoke('google-ads-refresh', {
+      body: { client_id: clientId },
+    });
+    setBusy(null);
+    if (error || !data?.ok) {
+      setMsg({ ok: false, text: await invokeErrorText(data, error) });
+      return;
+    }
+    setMsg({ ok: true, text: `Pulled ${data.campaigns ?? 0} campaign(s) from ${data.accounts ?? 1} account(s).` });
+  }
+
+  return (
+    <div className="card">
+      <div className="card-pad row between">
+        <div className="stack gap-2">
+          <span style={{ fontWeight: 500 }}>Google Ads</span>
+          <span className="meta">
+            {customerId
+              ? `Reporting from customer ${customerId}`
+              : 'Not configured — add this client’s Google Ads customer id to pull campaigns.'}
+          </span>
+          {msg && (
+            <span className="meta" style={{ color: msg.ok ? 'var(--accent)' : 'var(--danger, #c33)' }}>
+              {msg.ok ? '✓ ' : '⚠ '}
+              {msg.text}
+            </span>
+          )}
+        </div>
+        <div className="row gap-8">
+          {customerId && !editing && (
+            <button className="btn sm" onClick={refreshNow} disabled={busy !== null}>
+              {busy === 'refresh' ? 'Refreshing…' : 'Refresh now'}
+            </button>
+          )}
+          {!editing ? (
+            <button className="btn sm" onClick={() => setEditing(true)}>
+              <Icon name="link" size={12} /> {customerId ? 'Change' : 'Set customer id'}
+            </button>
+          ) : (
+            <>
+              <input
+                type="text"
+                className="input"
+                placeholder="123-456-7890"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                style={{ width: 140 }}
+                disabled={busy !== null}
+              />
+              <button className="btn primary sm" onClick={save} disabled={busy !== null}>
+                {busy === 'save' ? 'Saving…' : 'Save'}
+              </button>
+              <button className="btn ghost sm" onClick={() => setEditing(false)} disabled={busy !== null}>
+                Cancel
+              </button>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -191,6 +311,32 @@ function MetaAppOverridePanel({ clientId }: { clientId: string }) {
     refresh();
   }
 
+  const [connecting, setConnecting] = useState(false);
+  const workspace = useWorkspace();
+
+  /** OAuth path for the override: the long-lived token lands in
+   * client_meta_credentials via the meta-oauth callback (state carries
+   * client_id), so this client runs on its own Facebook connection. */
+  async function connectWithFacebook() {
+    if (!supabase || !workspace) return;
+    setConnecting(true);
+    setErr(null);
+    const { data, error } = await supabase.functions.invoke('meta-oauth', {
+      body: {
+        action: 'start',
+        workspace_id: workspace.id,
+        client_id: clientId,
+        return_to: window.location.href.split('?')[0],
+      },
+    });
+    setConnecting(false);
+    if (error || !data?.ok || !data?.url) {
+      setErr(await invokeErrorText(data, error));
+      return;
+    }
+    window.location.href = data.url as string;
+  }
+
   if (override === undefined) return null;
 
   const showForm = editing || (!override && editing);
@@ -225,18 +371,23 @@ function MetaAppOverridePanel({ clientId }: { clientId: string }) {
             </button>
           )}
           {!editing && (
-            <button
-              className="btn sm"
-              onClick={() => {
-                setLabel(override?.label ?? '');
-                setAppId(override?.appId ?? '');
-                setToken('');
-                setErr(null);
-                setEditing(true);
-              }}
-            >
-              <Icon name="link" size={12} /> {override?.hasToken ? 'Update' : 'Add override'}
-            </button>
+            <>
+              <button className="btn sm" onClick={connectWithFacebook} disabled={connecting}>
+                {connecting ? 'Redirecting…' : 'Connect with Facebook'}
+              </button>
+              <button
+                className="btn sm"
+                onClick={() => {
+                  setLabel(override?.label ?? '');
+                  setAppId(override?.appId ?? '');
+                  setToken('');
+                  setErr(null);
+                  setEditing(true);
+                }}
+              >
+                <Icon name="link" size={12} /> {override?.hasToken ? 'Update' : 'Add override'}
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -525,6 +676,15 @@ function Field({
   );
 }
 
+type MetaAssets = {
+  adAccounts: { id: string; name: string | null }[];
+  pages: {
+    id: string;
+    name: string | null;
+    ig: { id: string; username: string | null } | null;
+  }[];
+};
+
 function ConnectionForm({
   clientId,
   existing,
@@ -536,12 +696,47 @@ function ConnectionForm({
   onSaved: () => void;
   onCancel?: () => void;
 }) {
+  const workspace = useWorkspace();
   const [accountId, setAccountId] = useState(existing?.accountId ?? '');
   const [accessToken, setAccessToken] = useState('');
   const [pageId, setPageId] = useState(existing?.pageId ?? '');
   const [igAccountId, setIgAccountId] = useState(existing?.instagramBusinessAccountId ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [assets, setAssets] = useState<MetaAssets | null>(null);
+  const [loadingAssets, setLoadingAssets] = useState(false);
+  const [assetsErr, setAssetsErr] = useState<string | null>(null);
+
+  /** Pull the ad accounts + Pages the stored credential can see (workspace
+   * Facebook connection, or this client's own token) so the ids below can
+   * be picked instead of pasted. The token never reaches the browser. */
+  async function browseAssets() {
+    if (!supabase || !workspace) return;
+    setLoadingAssets(true);
+    setAssetsErr(null);
+    const { data, error: fnErr } = await supabase.functions.invoke('meta-oauth', {
+      body: { action: 'assets', workspace_id: workspace.id, client_id: clientId },
+    });
+    setLoadingAssets(false);
+    if (fnErr || !data?.ok) {
+      setAssetsErr(await invokeErrorText(data, fnErr));
+      return;
+    }
+    setAssets({
+      adAccounts: (data.ad_accounts as { id: string; name: string | null }[]) ?? [],
+      pages: ((data.pages as any[]) ?? []).map((p) => ({
+        id: p.id as string,
+        name: (p.name as string) ?? null,
+        ig: p.instagram_business_account
+          ? {
+              id: p.instagram_business_account.id as string,
+              username: (p.instagram_business_account.username as string) ?? null,
+            }
+          : null,
+      })),
+    });
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -581,11 +776,73 @@ function ConnectionForm({
       <div className="stack gap-4">
         <h2 className="h2">{existing ? 'Update Meta credentials' : 'Connect a Meta account'}</h2>
         <div className="meta">
-          Paste the long-lived access token + IDs from your Meta Business / Graph API Explorer.
-          We'll use these to pull campaign performance and post via the Marketing + Pages APIs.
-          OAuth will replace this form once the Meta app review is approved.
+          Assign this client's ad account, Facebook Page, and Instagram account. If the workspace
+          is connected with Facebook (Settings → Connections), pick them below and leave the token
+          blank — the workspace connection covers the API calls. Otherwise paste IDs + a token
+          manually.
         </div>
       </div>
+
+      <div className="row gap-8" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          className="btn sm"
+          onClick={browseAssets}
+          disabled={loadingAssets || submitting}
+        >
+          {loadingAssets ? 'Loading…' : assets ? 'Reload accounts' : 'Browse connected account'}
+        </button>
+        {assetsErr && (
+          <span className="meta" style={{ color: 'var(--danger, #c33)', fontSize: 12 }}>
+            ⚠ {assetsErr}
+          </span>
+        )}
+      </div>
+
+      {assets && (
+        <div className="grid grid-2 gap-12" style={{ gridTemplateColumns: '1fr 1fr' }}>
+          <label className="stack gap-4">
+            <span className="meta">Ad account ({assets.adAccounts.length} available)</span>
+            <select
+              value={accountId}
+              onChange={(e) => setAccountId(e.target.value)}
+              style={inputStyle}
+              disabled={submitting}
+            >
+              <option value="">— choose —</option>
+              {assets.adAccounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name ? `${a.name} (${a.id})` : a.id}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="stack gap-4">
+            <span className="meta">Facebook Page ({assets.pages.length} available)</span>
+            <select
+              value={pageId}
+              onChange={(e) => {
+                const page = assets.pages.find((p) => p.id === e.target.value);
+                setPageId(e.target.value);
+                setIgAccountId(page?.ig?.id ?? '');
+              }}
+              style={inputStyle}
+              disabled={submitting}
+            >
+              <option value="">— choose —</option>
+              {assets.pages.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name ? `${p.name} (${p.id})` : p.id}
+                  {p.ig ? ` · IG @${p.ig.username ?? p.ig.id}` : ''}
+                </option>
+              ))}
+            </select>
+            <span className="meta" style={{ fontSize: 11 }}>
+              Picking a Page auto-fills its linked Instagram Business account.
+            </span>
+          </label>
+        </div>
+      )}
 
       <label className="stack gap-4">
         <span className="meta">Ad Account ID</span>
@@ -615,8 +872,9 @@ function ConnectionForm({
           disabled={submitting}
         />
         <span className="meta" style={{ fontSize: 11 }}>
-          Long-lived user token or system user token. Generate via Graph API Explorer → Get
-          Token → extend at developers.facebook.com/tools/debug/accesstoken.
+          Optional when the workspace is connected with Facebook — leave blank to use that
+          connection. Otherwise: long-lived user or system user token, via Graph API Explorer →
+          Get Token → extend at developers.facebook.com/tools/debug/accesstoken.
         </span>
       </label>
 

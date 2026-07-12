@@ -3,6 +3,12 @@
 This file is for future Claude Code sessions in this repo. Read alongside
 [`README.md`](README.md) (which covers the same ground for humans).
 
+**Before starting roadmap work, check [`ROADMAP.md`](ROADMAP.md)** — the
+phased checklist to a fully-live product (billing, OAuth, Google Ads,
+approvals, remaining wireframe surfaces). Flip items to `- [x]` in the same
+commit that completes them; keep the `Status:` lines on external/manual
+steps current.
+
 ## What this repo is
 
 The **app** half of CanopyStudio — an AI-grounded ad + content platform.
@@ -106,6 +112,24 @@ Approve → Schedule (FB natively into Meta's scheduled queue; IG via the
 The remaining Meta publishing features (Stories, location tagging,
 carousels) are still roadmap.
 
+**The productionization sweep (July 2026, see [`ROADMAP.md`](ROADMAP.md))
+shipped:** public `/legal/*` pages; per-client + agency **profile docs**
+(`profile_docs`, injected into every AI prompt after skills); **BYO
+provider keys** (`workspace_api_keys` → `LlmOptions.apiKey`, 10% platform
+fee); the **Stripe billing layer** (credit ledger, plans, `stripe-webhook`
+/ `billing-portal` / `billing-cycle` — see Billing section); **Meta OAuth**
+(`meta-oauth` + `meta-data-deletion`, tokens land in the existing
+credential tables with `expires_at`); live **Approvals** + **Publishing
+Queue** views; **Google Ads reporting** scaffolding (`google-oauth`,
+`google-ads-refresh`, `platform` column on the campaign tables — code
+deployed but unexercised until the developer token exists); Settings
+**team** tab (invites accept-on-login) and real **api**/**billing** tabs;
+live **Ad Performance** and **Brand Intelligence**. Still open: external
+reviews (Meta App Review, Google verifications), Stripe dashboard setup +
+secrets, Overview/Clients still read the seeded `client_perf` /
+`urgent_issues` fixture tables (should compute from campaigns), and
+ad-group/ad-level Google ingestion.
+
 ## AI pipeline (jobs / providers / skills)
 
 Everything AI runs through one serverless pipeline:
@@ -162,12 +186,32 @@ Everything AI runs through one serverless pipeline:
 
 - Edge Function secrets: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
   `XAI_API_KEY` (image generation), `RESEND_API_KEY`, `INTERNAL_FN_SECRET`.
+- Billing (Phase 3 — inert until set): `STRIPE_SECRET_KEY`,
+  `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_PRO`,
+  `STRIPE_PRICE_FF`.
+- Meta OAuth (Phase 4 — inert until set): `FB_APP_ID`, `FB_APP_SECRET`,
+  optional `FB_LOGIN_CONFIG_ID` (FB Login for Business config).
+- Google Ads (Phase 6 — inert until set): `GOOGLE_OAUTH_CLIENT_ID`,
+  `GOOGLE_OAUTH_CLIENT_SECRET` (the Ads-connect OAuth client, not the
+  Supabase sign-in one), `GOOGLE_ADS_DEVELOPER_TOKEN`.
 - Vault secrets (for pg_cron): `canopy_functions_url`
   (`https://<ref>.supabase.co/functions/v1`) and
   `canopy_internal_fn_secret` (must equal `INTERNAL_FN_SECRET`).
 - Until these exist, cron runs error harmlessly in
   `cron.job_run_details` and the AI tabs surface "not configured"
   errors.
+
+**Hosted state (as of 2026-07-11):** everything above exists except
+`RESEND_API_KEY` (email report delivery; Slack works without it). The Vault
+pair was only created 2026-07-10 — every cron before that failed silently,
+so treat old `cron.job_run_details` errors as historical. Along the way
+`INTERNAL_FN_SECRET` was **rotated to a dedicated random value**; it is NOT
+the anon key (an old convention some comments used to claim). If the two
+halves ever drift again, don't hunt for the old value — rotate both to a
+fresh one (`supabase secrets set INTERNAL_FN_SECRET=…` +
+`vault.update_secret` on `canopy_internal_fn_secret`) and verify by
+comparing sha256 digests (`supabase secrets list` shows the function-side
+digest; hash the vault side in SQL with `extensions.digest`).
 
 ## Website scraper
 
@@ -309,8 +353,15 @@ embedded). Key decisions:
   default / `openai`, free-text model, Settings → AI panel — never
   hardcode a model), calls the provider, stores the PNG in the public
   `client-assets` bucket under the post's client, and sets
-  `content_posts.image_url`. Secrets: `XAI_API_KEY` (add to the checklist)
-  / `OPENAI_API_KEY`.
+  `content_posts.image_url`. Secrets: `XAI_API_KEY` / `OPENAI_API_KEY`.
+  **xAI retired `grok-2-image` mid-2026** — the current family is
+  `grok-imagine-image` (fast; the code fallback), `grok-imagine-image-quality`,
+  and `grok-imagine-video` / `-1.5` (unused so far — the natural future
+  AI-video source for the `video` media type). If a provider errors with
+  "model does not exist", the fix is a Settings → AI edit (the row's
+  free-text model beats the code fallback — no deploy); update the fallback
+  in `generate-post-image` when convenient. The function accepts both
+  provider response shapes (`b64_json` or a temporary `url`).
 - **Media types**: `media_type` = `image` (default) / `video` / `link` with
   `video_url` / `link_url` columns. Publishing branches per type — video:
   FB `/{page}/videos` (file_url), IG as a **Reel** whose container
@@ -418,7 +469,44 @@ strategy instead of re-deriving it.
 invoked only by pg_cron, which sends `X-Internal-Secret` but no JWT-shaped
 `Authorization` header, so the gateway would 401 it otherwise. `isInternalCall`
 is the real gate. Sibling functions invoked via `invokeInternal` pass a
-service-role Bearer, so they keep `verify_jwt = true`.
+service-role Bearer, so they keep `verify_jwt = true`. The same pattern —
+public endpoint, real gate in code — covers the other `verify_jwt = false`
+functions: `stripe-webhook` (Stripe-Signature HMAC), `meta-oauth` +
+`google-oauth` GET callbacks (single-use 10-min `oauth_states` row), and
+`meta-data-deletion` (`signed_request` HMAC).
+
+## Billing (Stripe, USD credit ledger)
+
+`credit_ledger` is the single append-only source of truth (usage debits,
+subscription grants, top-ups, postpaid invoice payments);
+`billing_accounts.balance_usd` is a trigger-maintained cache. Pricing lives
+in [`_shared/ai/usage.ts`](supabase/functions/_shared/ai/usage.ts):
+`billed_usd = max(floor, rateCard × 2)` (+$0.13 surcharge past $0.50 raw;
+floors $0.13 generation / $0.10 analysis; images flat per-image; BYO-key
+calls 10% of rate-card, no floor). Money flow: `billing-portal` (owner-only)
+mints Checkout/Portal URLs and never writes; **`stripe-webhook` is the only
+writer of payment truth** (idempotent via `stripe_events`; a failed handler
+releases the idempotency row so Stripe retries); `billing-cycle` (internal,
+daily cron `canopy-billing-cycle`) invoices friends & family accounts
+monthly or at −$25. Enforcement (`billingBlockReason`, 402 from
+`enqueue-job` / `generate-post-image`): **no `billing_accounts` row = billing
+not enabled = never blocked** — existing workspaces are unaffected until
+they subscribe. Plan allowances (`allowanceForPlan` in `_shared/stripe.ts`):
+starter $5/mo → $10 credits, pro $29/mo → $60; friends & family is a $0
+subscription running postpaid.
+
+## OAuth connections (Meta + Google)
+
+`meta-oauth` / `google-oauth` share one shape: authed owner-gated POST
+`{action:'start', …}` inserts a single-use `oauth_states` row and returns
+the provider dialog URL; the GET callback (no JWT — gated by the state row,
+10-min TTL, claim-and-delete) exchanges the code and upserts into the
+existing credential tables (`workspace_meta_credentials` /
+`client_meta_credentials` + new `expires_at`, or
+`workspace_google_credentials` refresh token). `resolveAccessToken` order in
+the Meta functions is untouched; manual System-User paste remains the
+advanced path (never expires, no review). The daily refresh cron warns
+connectors when an OAuth token is ≤7 days from expiry.
 
 ## Useful commands
 
@@ -442,12 +530,27 @@ supabase db query --linked --output table 'select ...' # ad-hoc (works when the 
 
 # Smoke-test an Edge Function via the internal path (no browser session).
 # The gateway needs a JWT-shaped Authorization header (verify_jwt); the code
-# trusts X-Internal-Secret. ANON_JWT = the legacy anon key; must match INTERNAL_FN_SECRET.
+# trusts X-Internal-Secret. INTERNAL_FN_SECRET is its own random value (NOT
+# the anon key — that old convention is dead); read it from Vault:
+#   supabase db query --linked --output json \
+#     "select decrypted_secret from vault.decrypted_secrets where name='canopy_internal_fn_secret';"
 curl -s -X POST "https://<ref>.supabase.co/functions/v1/meta-refresh-client" \
   -H "Authorization: Bearer $ANON_JWT" \
   -H "X-Internal-Secret: $INTERNAL_FN_SECRET" \
   -d '{"client_id":"..."}'
 ```
+
+## Verifying changes end-to-end
+
+[`.claude/skills/verify/SKILL.md`](.claude/skills/verify/SKILL.md) is the
+battle-tested recipe for driving the live `/app` UI against the **local**
+stack (never hosted — `.env.local` points at real accounts): local
+Supabase + `functions serve` with a borrowed key, a throwaway
+user/workspace seeded via the auth admin API + psql, Vite with env
+overrides, and playwright-core on system Chrome. It includes the gotchas
+that cost time (env var names, psql heredoc/transaction traps, ambiguous
+Playwright selectors). Use it before committing feature work; clean up the
+test data after.
 
 ## Meta publishing features (confirmed API-capable)
 

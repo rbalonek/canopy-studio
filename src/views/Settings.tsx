@@ -5,10 +5,17 @@ import { Icon } from '../components/Icon';
 import { useWorkspace } from '../workspace/WorkspaceProvider';
 import { AccountTab } from './settings/AccountTab';
 import { AiSettingsTab } from './settings/AiSettingsTab';
+import { ApiKeysPanel } from './settings/ApiKeysPanel';
+import { BillingPanel } from './settings/BillingPanel';
+import { WorkspaceGooglePanel } from './settings/WorkspaceGooglePanel';
 import { ConnectorsPanel } from './settings/ConnectorsPanel';
 import { SkillsTab } from './settings/SkillsTab';
+import { TeamTab } from './settings/TeamTab';
 import { WorkspaceTab } from './settings/WorkspaceTab';
 
+// notifications + excluded-accounts were cut: the notification log lives
+// with the connectors it belongs to, and per-location ad-account scoping
+// already covers account exclusion.
 type TabId =
   | 'account'
   | 'workspace'
@@ -17,9 +24,7 @@ type TabId =
   | 'ai'
   | 'skills'
   | 'billing'
-  | 'api'
-  | 'notifications'
-  | 'excluded accounts';
+  | 'api';
 
 const TABS: TabId[] = [
   'account',
@@ -30,14 +35,11 @@ const TABS: TabId[] = [
   'skills',
   'billing',
   'api',
-  'notifications',
-  'excluded accounts',
 ];
 
 type FuturePlatform = { name: string; status: string };
 
 const FUTURE_PLATFORMS: FuturePlatform[] = [
-  { name: 'Google Ads', status: 'Coming soon' },
   { name: 'TikTok Ads', status: 'Coming soon' },
   { name: 'LinkedIn Ads', status: 'Coming soon' },
 ];
@@ -68,12 +70,18 @@ export function Settings() {
             <AccountTab />
           ) : tab === 'workspace' ? (
             <WorkspaceTab />
+          ) : tab === 'team' ? (
+            <TeamTab />
           ) : tab === 'connections' ? (
             <ConnectionsTab />
           ) : tab === 'ai' ? (
             <AiSettingsTab />
           ) : tab === 'skills' ? (
             <SkillsTab />
+          ) : tab === 'api' ? (
+            <ApiKeysPanel />
+          ) : tab === 'billing' ? (
+            <BillingPanel />
           ) : (
             <Empty title={`${tab} — wireframe`} body="Form-based settings panel following shell conventions." />
           )}
@@ -87,6 +95,7 @@ function ConnectionsTab() {
   return (
     <div className="stack gap-16">
       <WorkspaceMetaPanel />
+      <WorkspaceGooglePanel />
       <ConnectorsPanel />
       <div className="card">
         <div
@@ -125,12 +134,23 @@ type MetaCreds = {
   hasToken: boolean;
   businessManagerId: string | null;
   updatedAt: string | null;
+  expiresAt: string | null;
 };
 
 function WorkspaceMetaPanel() {
   const workspace = useWorkspace();
   const [creds, setCreds] = useState<MetaCreds | null | undefined>(undefined);
   const [editing, setEditing] = useState(false);
+  const [oauthBusy, setOauthBusy] = useState(false);
+  const [oauthMsg, setOauthMsg] = useState<string | null>(() => {
+    // Landing back from the meta-oauth callback (?meta=connected|error).
+    const params = new URLSearchParams(window.location.search);
+    const meta = params.get('meta');
+    if (!meta) return null;
+    return meta === 'connected'
+      ? '✓ Facebook connected — the workspace token was saved.'
+      : `⚠ Facebook connect failed: ${params.get('reason') ?? 'unknown error'}`;
+  });
 
   async function refresh() {
     if (!supabase || !workspace) {
@@ -139,7 +159,7 @@ function WorkspaceMetaPanel() {
     }
     const { data } = await supabase
       .from('workspace_meta_credentials')
-      .select('access_token, business_manager_id, updated_at')
+      .select('access_token, business_manager_id, updated_at, expires_at')
       .eq('workspace_id', workspace.id)
       .maybeSingle();
     if (!data) {
@@ -150,8 +170,29 @@ function WorkspaceMetaPanel() {
       hasToken: !!data.access_token,
       businessManagerId: (data.business_manager_id as string | null) ?? null,
       updatedAt: (data.updated_at as string | null) ?? null,
+      expiresAt: (data.expires_at as string | null) ?? null,
     });
   }
+
+  async function connectWithFacebook() {
+    if (!supabase || !workspace) return;
+    setOauthBusy(true);
+    setOauthMsg(null);
+    const { data, error } = await supabase.functions.invoke('meta-oauth', {
+      body: { action: 'start', workspace_id: workspace.id, return_to: window.location.href.split('?')[0] },
+    });
+    setOauthBusy(false);
+    if (error || !data?.ok || !data?.url) {
+      const { invokeErrorText } = await import('../lib/invokeError');
+      setOauthMsg(`⚠ ${await invokeErrorText(data, error)}`);
+      return;
+    }
+    window.location.href = data.url as string;
+  }
+
+  const expiryDays = creds?.expiresAt
+    ? Math.floor((new Date(creds.expiresAt).getTime() - Date.now()) / 86_400_000)
+    : null;
 
   useEffect(() => {
     setCreds(undefined);
@@ -180,6 +221,9 @@ function WorkspaceMetaPanel() {
         </div>
         {creds?.hasToken && !editing && (
           <div className="row gap-8">
+            <button className="btn primary sm" onClick={connectWithFacebook} disabled={oauthBusy}>
+              {oauthBusy ? 'Redirecting…' : 'Reconnect with Facebook'}
+            </button>
             <button className="btn sm" onClick={() => setEditing(true)}>
               <Icon name="link" size={12} /> Update token
             </button>
@@ -202,16 +246,56 @@ function WorkspaceMetaPanel() {
         )}
       </div>
 
+      {oauthMsg && (
+        <div className="card-pad">
+          <span
+            className="meta"
+            style={{ color: oauthMsg.startsWith('✓') ? 'var(--accent)' : 'var(--danger, #c33)' }}
+          >
+            {oauthMsg}
+          </span>
+        </div>
+      )}
+
+      {expiryDays !== null && expiryDays <= 7 && !editing && (
+        <div className="card-pad">
+          <div className="banner amber">
+            {expiryDays <= 0
+              ? 'The Facebook token has expired — reconnect with Facebook to keep refreshes and publishing working.'
+              : `The Facebook token expires in ${expiryDays} day${expiryDays === 1 ? '' : 's'} — reconnect with Facebook to renew it.`}
+          </div>
+        </div>
+      )}
+
       {(editing || !creds?.hasToken) && (
-        <WorkspaceMetaForm
-          workspaceId={workspace.id}
-          existing={creds}
-          onSaved={() => {
-            setEditing(false);
-            refresh();
-          }}
-          onCancel={creds?.hasToken ? () => setEditing(false) : undefined}
-        />
+        <>
+          {!creds?.hasToken && (
+            <div className="card-pad stack gap-8" style={{ borderBottom: '1px solid var(--border)' }}>
+              <button
+                className="btn primary"
+                style={{ justifyContent: 'center' }}
+                onClick={connectWithFacebook}
+                disabled={oauthBusy}
+              >
+                {oauthBusy ? 'Redirecting…' : 'Connect with Facebook'}
+              </button>
+              <span className="meta" style={{ fontSize: 11 }}>
+                Recommended: sign in with the Facebook account that manages your Business Manager.
+                Advanced: paste a System User token below instead (never expires; no review needed
+                on your own BM).
+              </span>
+            </div>
+          )}
+          <WorkspaceMetaForm
+            workspaceId={workspace.id}
+            existing={creds}
+            onSaved={() => {
+              setEditing(false);
+              refresh();
+            }}
+            onCancel={creds?.hasToken ? () => setEditing(false) : undefined}
+          />
+        </>
       )}
 
       {!editing && creds?.hasToken && (

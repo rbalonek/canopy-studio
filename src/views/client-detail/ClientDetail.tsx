@@ -15,6 +15,7 @@ import { CompetitorsTab } from './CompetitorsTab';
 import { LocationsTab } from './LocationsTab';
 import { OverviewTab } from './OverviewTab';
 import { ScrapedPagesTab } from './ScrapedPagesTab';
+import { ProfileDocEditor } from '../settings/ProfileDocEditor';
 
 type TabId =
   | 'overview'
@@ -24,9 +25,10 @@ type TabId =
   | 'scraped pages'
   | 'competitors'
   | 'ad accounts'
+  | 'profile'
   | 'locations';
 
-const BASE_TABS: TabId[] = ['overview', 'brand', 'calendar', 'assets', 'scraped pages', 'competitors', 'ad accounts'];
+const BASE_TABS: TabId[] = ['overview', 'brand', 'calendar', 'assets', 'scraped pages', 'competitors', 'ad accounts', 'profile'];
 
 export function ClientDetail() {
   const { state } = useAppState();
@@ -295,6 +297,8 @@ export function ClientDetail() {
         <CompetitorsTab clientId={header.id} />
       ) : tab === 'ad accounts' ? (
         <AdAccountsTab clientId={header.id} />
+      ) : tab === 'profile' ? (
+        <ProfileDocEditor clientId={header.id} />
       ) : tab === 'locations' ? (
         <LocationsTab clientId={header.id} parentName={header.name} />
       ) : (

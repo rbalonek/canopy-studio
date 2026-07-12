@@ -2,8 +2,9 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import type { Provider, Session, User } from '@supabase/supabase-js';
 import { supabase } from './supabaseClient';
 
-/** OAuth providers we expose in the UI. Must be enabled in the Supabase dashboard before they work. */
-export type OAuthProvider = Extract<Provider, 'google' | 'azure' | 'apple'>;
+/** OAuth providers we expose in the UI. Must be enabled in the Supabase dashboard before they work.
+ * facebook ships in the Login button list once the Meta app clears review. */
+export type OAuthProvider = Extract<Provider, 'google' | 'azure' | 'apple' | 'facebook'>;
 
 type AuthState = {
   session: Session | null;

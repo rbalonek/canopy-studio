@@ -17,6 +17,8 @@
 // deno-lint-ignore-file no-explicit-any
 import { CORS, json } from '../_shared/cors.ts';
 import { authenticate, serviceClient } from '../_shared/auth.ts';
+import { loadWorkspaceKeys } from '../_shared/ai/orchestrator.ts';
+import { billingBlockReason, recordImageUsage } from '../_shared/ai/usage.ts';
 
 interface GenerateRequest {
   content_post_id: string;
@@ -59,6 +61,10 @@ Deno.serve(async (req) => {
 
     const service = serviceClient();
 
+    // Billing gate — same 402 semantics as enqueue-job.
+    const blocked = await billingBlockReason(service, post.workspace_id as string);
+    if (blocked) return json({ ok: false, error: blocked }, 402);
+
     // Which provider/model: the image_generation ai_settings row; xAI default.
     const { data: settings } = await service
       .from('ai_settings')
@@ -72,8 +78,23 @@ Deno.serve(async (req) => {
       DEFAULT_MODELS[provider] ||
       DEFAULT_MODELS.xai;
 
+    // BYO key when the workspace has one for this provider; platform
+    // secret otherwise — same resolution as the chat pipeline.
+    const keys = await loadWorkspaceKeys(service, post.workspace_id as string);
+    const byoKey = provider === 'openai' ? keys.openai : keys.xai;
+
     const image =
-      provider === 'openai' ? await openaiImage(prompt, model) : await xaiImage(prompt, model);
+      provider === 'openai'
+        ? await openaiImage(prompt, model, byoKey)
+        : await xaiImage(prompt, model, byoKey);
+
+    // Meter it (this function recorded nothing before — a billing leak).
+    await recordImageUsage(service, {
+      workspaceId: post.workspace_id as string,
+      provider,
+      model,
+      keySource: byoKey ? 'workspace' : 'platform',
+    });
 
     // Store in the public client-assets bucket under the post's client, so
     // the URL renders app-wide and can be handed to the Meta publisher.
@@ -111,8 +132,8 @@ async function imageBytes(image: GeneratedImage): Promise<Uint8Array> {
   throw new Error('Provider returned no image data');
 }
 
-async function xaiImage(prompt: string, model: string): Promise<GeneratedImage> {
-  const key = Deno.env.get('XAI_API_KEY');
+async function xaiImage(prompt: string, model: string, byoKey?: string): Promise<GeneratedImage> {
+  const key = byoKey || Deno.env.get('XAI_API_KEY');
   if (!key) throw new Error('XAI_API_KEY is not configured (Edge Function secrets)');
   const resp = await fetch('https://api.x.ai/v1/images/generations', {
     method: 'POST',
@@ -127,8 +148,8 @@ async function xaiImage(prompt: string, model: string): Promise<GeneratedImage> 
   return { b64: first.b64_json as string | undefined, url: first.url as string | undefined };
 }
 
-async function openaiImage(prompt: string, model: string): Promise<GeneratedImage> {
-  const key = Deno.env.get('OPENAI_API_KEY');
+async function openaiImage(prompt: string, model: string, byoKey?: string): Promise<GeneratedImage> {
+  const key = byoKey || Deno.env.get('OPENAI_API_KEY');
   if (!key) throw new Error('OPENAI_API_KEY is not configured (Edge Function secrets)');
   const resp = await fetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',
