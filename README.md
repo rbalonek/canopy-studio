@@ -5,6 +5,16 @@ audience modes (Agency / Business) drive vocabulary throughout. The repo
 hosts the **app** (this `.app` domain product); the marketing site lives
 in a separate project on `.com`.
 
+**Live today:** Meta campaign reporting (multi-period + historical
+backfill), the AI pipeline (ad copy, creative directions, analyses,
+reports, content calendars) with per-workspace provider settings, skills,
+and profile docs, organic FB/IG publishing + scheduling, an Approvals
+inbox with one-click publish (ads always created paused), a Stripe credit
+ledger awaiting dashboard setup, Meta/Google OAuth connect flows awaiting
+app credentials, and public legal pages. [`ROADMAP.md`](ROADMAP.md) tracks
+what's done and what's still in flight (external reviews, Google Ads
+activation).
+
 ## Stack
 
 - Vite + React 18 + TypeScript + React Router v6

@@ -216,19 +216,26 @@ platform-agnostic); Google campaign ids prefixed `gads_<id>`.
 
 ## Phase 7 — Surface completion + docs
 
-- [ ] `AdPerf.tsx` live branch: cross-client ads leaderboard via
-      `metaMetrics.ts` (+ platform filter).
-- [ ] `BrandIntelligence.tsx` live branch: wire /dev tabs to live
-      `brand_profiles` + `competitors` + `scraped_domains` signals.
-- [ ] Settings → team: members list, role change/remove (SECURITY DEFINER
-      RPC), invite-by-email (`workspace_invites` + accept-on-login).
-- [ ] Settings → notifications + excluded accounts: **cut** from live TABS
-      (notification-log link folds into connections; per-location ad-account
-      scoping covers exclusions).
-- [ ] `Overview.tsx` / `Clients.tsx`: remove residual mock placeholder merges.
-- [ ] README + CLAUDE.md full refresh: routing/live-state, billing
-      architecture + ledger model, new secrets (`STRIPE_*`, `FB_APP_*`,
-      `GOOGLE_*`), new `verify_jwt=false` functions and their gates.
+- [x] `AdPerf.tsx` live branch (`adperf/LiveAdPerf.tsx`): cross-client
+      campaign leaderboard + per-client subtotals + workspace total via
+      `metaMetrics.ts`, period toggle, client filter, platform chips.
+- [x] `BrandIntelligence.tsx` live branch (`brand/LiveBrand.tsx`): client
+      picker over the existing live per-client tabs (BrandTab,
+      CompetitorsTab, ScrapedPagesTab, AssetsTab). Cross-client rollups
+      (rules/compare/gaps) stay /dev-only until they earn a live port.
+- [x] Settings → team: roster via `list_workspace_members` RPC, owner-only
+      role change/remove RPCs, invite-by-email with accept-on-login
+      (`accept_workspace_invites` runs before the workspace list loads).
+      No invite email sent yet — UI says so.
+- [x] Settings → notifications + excluded accounts: cut from live TABS.
+- [ ] `Overview.tsx` / `Clients.tsx`: replace reads of the seeded
+      `client_perf` / `urgent_issues` fixture tables with aggregates
+      computed from real `campaigns` rows (deliberately deferred — a
+      careful refactor of the main dashboard, not a mechanical sweep).
+- [x] README + CLAUDE.md refresh: live-state summary, billing ledger
+      section, OAuth-connections section, secrets checklist
+      (`STRIPE_*`, `FB_APP_*`, `GOOGLE_*`), `verify_jwt=false` gate
+      inventory.
 
 ---
 

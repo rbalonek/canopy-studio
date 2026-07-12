@@ -112,6 +112,24 @@ Approve → Schedule (FB natively into Meta's scheduled queue; IG via the
 The remaining Meta publishing features (Stories, location tagging,
 carousels) are still roadmap.
 
+**The productionization sweep (July 2026, see [`ROADMAP.md`](ROADMAP.md))
+shipped:** public `/legal/*` pages; per-client + agency **profile docs**
+(`profile_docs`, injected into every AI prompt after skills); **BYO
+provider keys** (`workspace_api_keys` → `LlmOptions.apiKey`, 10% platform
+fee); the **Stripe billing layer** (credit ledger, plans, `stripe-webhook`
+/ `billing-portal` / `billing-cycle` — see Billing section); **Meta OAuth**
+(`meta-oauth` + `meta-data-deletion`, tokens land in the existing
+credential tables with `expires_at`); live **Approvals** + **Publishing
+Queue** views; **Google Ads reporting** scaffolding (`google-oauth`,
+`google-ads-refresh`, `platform` column on the campaign tables — code
+deployed but unexercised until the developer token exists); Settings
+**team** tab (invites accept-on-login) and real **api**/**billing** tabs;
+live **Ad Performance** and **Brand Intelligence**. Still open: external
+reviews (Meta App Review, Google verifications), Stripe dashboard setup +
+secrets, Overview/Clients still read the seeded `client_perf` /
+`urgent_issues` fixture tables (should compute from campaigns), and
+ad-group/ad-level Google ingestion.
+
 ## AI pipeline (jobs / providers / skills)
 
 Everything AI runs through one serverless pipeline:
@@ -168,6 +186,14 @@ Everything AI runs through one serverless pipeline:
 
 - Edge Function secrets: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
   `XAI_API_KEY` (image generation), `RESEND_API_KEY`, `INTERNAL_FN_SECRET`.
+- Billing (Phase 3 — inert until set): `STRIPE_SECRET_KEY`,
+  `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_PRO`,
+  `STRIPE_PRICE_FF`.
+- Meta OAuth (Phase 4 — inert until set): `FB_APP_ID`, `FB_APP_SECRET`,
+  optional `FB_LOGIN_CONFIG_ID` (FB Login for Business config).
+- Google Ads (Phase 6 — inert until set): `GOOGLE_OAUTH_CLIENT_ID`,
+  `GOOGLE_OAUTH_CLIENT_SECRET` (the Ads-connect OAuth client, not the
+  Supabase sign-in one), `GOOGLE_ADS_DEVELOPER_TOKEN`.
 - Vault secrets (for pg_cron): `canopy_functions_url`
   (`https://<ref>.supabase.co/functions/v1`) and
   `canopy_internal_fn_secret` (must equal `INTERNAL_FN_SECRET`).
@@ -443,7 +469,44 @@ strategy instead of re-deriving it.
 invoked only by pg_cron, which sends `X-Internal-Secret` but no JWT-shaped
 `Authorization` header, so the gateway would 401 it otherwise. `isInternalCall`
 is the real gate. Sibling functions invoked via `invokeInternal` pass a
-service-role Bearer, so they keep `verify_jwt = true`.
+service-role Bearer, so they keep `verify_jwt = true`. The same pattern —
+public endpoint, real gate in code — covers the other `verify_jwt = false`
+functions: `stripe-webhook` (Stripe-Signature HMAC), `meta-oauth` +
+`google-oauth` GET callbacks (single-use 10-min `oauth_states` row), and
+`meta-data-deletion` (`signed_request` HMAC).
+
+## Billing (Stripe, USD credit ledger)
+
+`credit_ledger` is the single append-only source of truth (usage debits,
+subscription grants, top-ups, postpaid invoice payments);
+`billing_accounts.balance_usd` is a trigger-maintained cache. Pricing lives
+in [`_shared/ai/usage.ts`](supabase/functions/_shared/ai/usage.ts):
+`billed_usd = max(floor, rateCard × 2)` (+$0.13 surcharge past $0.50 raw;
+floors $0.13 generation / $0.10 analysis; images flat per-image; BYO-key
+calls 10% of rate-card, no floor). Money flow: `billing-portal` (owner-only)
+mints Checkout/Portal URLs and never writes; **`stripe-webhook` is the only
+writer of payment truth** (idempotent via `stripe_events`; a failed handler
+releases the idempotency row so Stripe retries); `billing-cycle` (internal,
+daily cron `canopy-billing-cycle`) invoices friends & family accounts
+monthly or at −$25. Enforcement (`billingBlockReason`, 402 from
+`enqueue-job` / `generate-post-image`): **no `billing_accounts` row = billing
+not enabled = never blocked** — existing workspaces are unaffected until
+they subscribe. Plan allowances (`allowanceForPlan` in `_shared/stripe.ts`):
+starter $5/mo → $10 credits, pro $29/mo → $60; friends & family is a $0
+subscription running postpaid.
+
+## OAuth connections (Meta + Google)
+
+`meta-oauth` / `google-oauth` share one shape: authed owner-gated POST
+`{action:'start', …}` inserts a single-use `oauth_states` row and returns
+the provider dialog URL; the GET callback (no JWT — gated by the state row,
+10-min TTL, claim-and-delete) exchanges the code and upserts into the
+existing credential tables (`workspace_meta_credentials` /
+`client_meta_credentials` + new `expires_at`, or
+`workspace_google_credentials` refresh token). `resolveAccessToken` order in
+the Meta functions is untouched; manual System-User paste remains the
+advanced path (never expires, no review). The daily refresh cron warns
+connectors when an OAuth token is ≤7 days from expiry.
 
 ## Useful commands
 
