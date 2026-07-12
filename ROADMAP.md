@@ -155,16 +155,21 @@ manual System-User paste stays as an "Advanced" option.
 Pure composition over `publish-meta-post` / `publish-meta-ad` — no new tables
 or functions.
 
-- [ ] Provider methods `listPendingApprovals` + `listPublishQueue`
-      (`provider.ts` / `supabaseProvider.ts`).
-- [ ] `Approvals.tsx` live branch: draft `content_posts` (Approve / Approve &
-      Schedule / **Approve & Post now** with per-item confirm — organic has no
-      paused state); draft `generations` (**Approve & Publish (paused)** —
-      single-click safe); `content_plans` bulk approve (status flip only).
-      Sequential fan-out, per-item results, one failure never blocks the rest.
-- [ ] `Publish.tsx` live branch: scheduled/published/failed posts +
-      `post_publishes`/`ad_publishes` audit rows; retry/cancel actions.
-- [ ] `src/routes.ts`: flip `live: true` on `approvals` + `publish`.
+- [x] Data access: direct-supabase in the live views (SkillsTab/LiveCalendar
+      convention) — provider methods unnecessary; shared `invokeErrorText`
+      helper extracted to `src/lib/invokeError.ts`.
+- [x] `Approvals.tsx` live branch (`approvals/LiveApprovals.tsx`): draft
+      `content_posts` (Approve / Approve & Schedule / **Approve & Post now**
+      with per-item confirm — organic has no paused state); draft
+      `generations` (**Publish to Meta (paused)** with inline daily budget —
+      single-click safe, ads always created PAUSED); `content_plans` bulk
+      approve (status flip only). Per-row results; one failure never blocks
+      the rest.
+- [x] `Publish.tsx` live branch (`publish/LivePublishQueue.tsx`):
+      scheduled posts (FB-native vs IG-cron badges, Cancel), failed posts
+      (error shown, deliberate Re-approve instead of one-click retry),
+      merged `post_publishes`/`ad_publishes` activity table.
+- [x] `src/routes.ts`: `live: true` on `approvals` + `publish`.
 
 ## Phase 6 — Google Ads reporting
 
