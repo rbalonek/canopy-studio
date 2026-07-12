@@ -10,6 +10,10 @@ import { getSupabaseProvider } from './data/supabaseProvider';
 import type { Workspace } from './data/types';
 import { Login } from './views/Login';
 import { LiveOnboard } from './views/LiveOnboard';
+import { LegalLayout } from './views/legal/LegalLayout';
+import { Privacy } from './views/legal/Privacy';
+import { Terms } from './views/legal/Terms';
+import { DataDeletion } from './views/legal/DataDeletion';
 import { WorkspaceProvider } from './workspace/WorkspaceProvider';
 
 /**
@@ -23,6 +27,9 @@ import { WorkspaceProvider } from './workspace/WorkspaceProvider';
  *                    data provider, RLS-scoped to the user's workspace.
  *   /dev/*         → design reference, no auth, mock provider. Untouched
  *                    from the wireframe import.
+ *   /legal/*       → public legal pages (privacy, terms, data deletion).
+ *                    No auth — Meta/Google app review require login-free
+ *                    URLs for these.
  */
 export default function App() {
   return (
@@ -40,6 +47,12 @@ export default function App() {
               </DataProviderProvider>
             }
           />
+          <Route path="/legal" element={<LegalLayout />}>
+            <Route index element={<Navigate to="/legal/privacy" replace />} />
+            <Route path="privacy" element={<Privacy />} />
+            <Route path="terms" element={<Terms />} />
+            <Route path="data-deletion" element={<DataDeletion />} />
+          </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>

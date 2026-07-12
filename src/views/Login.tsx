@@ -1,14 +1,29 @@
 import { useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth, type OAuthProvider } from '../auth/AuthProvider';
 
 type Mode = 'login' | 'signup' | 'reset';
 
-const TRUST_TAGS = ['SOC 2 ready', 'Built on Supabase', 'Stripe-secured'];
-
+// Only providers actually enabled in the Supabase dashboard belong here —
+// a listed-but-disabled provider surfaces as an error toast on click.
+// Facebook joins once the Meta App Review phase lands.
 const OAUTH_PROVIDERS: { id: OAuthProvider; label: string }[] = [
   { id: 'google', label: 'Google' },
-  { id: 'azure', label: 'Microsoft' },
-  { id: 'apple', label: 'Apple' },
+];
+
+const VALUE_POINTS = [
+  {
+    title: 'One canopy over every channel',
+    body: 'Meta ads, organic Facebook + Instagram, and reporting in one place — per client, per location.',
+  },
+  {
+    title: 'AI that knows the brand',
+    body: 'Copy, creative directions, and content calendars grounded in each client’s real website and campaigns.',
+  },
+  {
+    title: 'Approve, then it ships',
+    body: 'Posts publish on your say-so; ads are always created paused for a final check in Meta.',
+  },
 ];
 
 /**
@@ -87,8 +102,8 @@ export function Login() {
     >
       <div style={{ padding: '48px 64px', display: 'flex', flexDirection: 'column' }}>
         <div className="row gap-8">
-          <div className="logo-mark">R</div>
-          <span style={{ fontWeight: 500 }}>Redwood Digital Strategies</span>
+          <div className="logo-mark">C</div>
+          <span style={{ fontWeight: 500 }}>CanopyStudio</span>
         </div>
 
         <div
@@ -253,15 +268,29 @@ export function Login() {
                   className="meta"
                   style={{ fontSize: 11, textAlign: 'center', color: 'var(--fg-3)' }}
                 >
-                  By continuing you agree to the Terms and Privacy Policy.
+                  By continuing you agree to the{' '}
+                  <Link to="/legal/terms" style={{ color: 'var(--accent)' }}>
+                    Terms of Service
+                  </Link>{' '}
+                  and{' '}
+                  <Link to="/legal/privacy" style={{ color: 'var(--accent)' }}>
+                    Privacy Policy
+                  </Link>
+                  .
                 </div>
               </>
             )}
           </form>
         </div>
 
-        <div className="meta" style={{ fontSize: 11 }}>
-          © 2025 Redwood Digital Strategies
+        <div className="row gap-12 meta" style={{ fontSize: 11 }}>
+          <span>© 2026 CanopyStudio</span>
+          <Link to="/legal/privacy" style={{ color: 'var(--fg-3)' }}>
+            Privacy
+          </Link>
+          <Link to="/legal/terms" style={{ color: 'var(--fg-3)' }}>
+            Terms
+          </Link>
         </div>
       </div>
 
@@ -274,28 +303,22 @@ export function Login() {
           borderLeft: '1px solid var(--border)',
         }}
       >
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="ph" style={{ width: 280, height: 280, borderRadius: 16 }}>
-            Redwood canopy illustration
-            <br />
-            with data rings overlay
-          </div>
-        </div>
-        <div className="card card-pad stack gap-8">
-          <div className="meta">
-            "CanopyStudio replaced four tools in our stack. Our agency saves 12 hours a week on
-            reporting."
-          </div>
-          <div className="row gap-8">
-            <div className="ph" style={{ width: 24, height: 24, borderRadius: 999 }} />
-            <span className="meta">Maya H. · Redwood</span>
-          </div>
-        </div>
-        <div className="row gap-8" style={{ justifyContent: 'center', marginTop: 16 }}>
-          {TRUST_TAGS.map((t) => (
-            <span key={t} className="tag">
-              {t}
-            </span>
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            gap: 16,
+            maxWidth: 360,
+            margin: '0 auto',
+          }}
+        >
+          {VALUE_POINTS.map((v) => (
+            <div key={v.title} className="card card-pad stack gap-4">
+              <div style={{ fontWeight: 600, fontSize: 13 }}>{v.title}</div>
+              <div className="meta">{v.body}</div>
+            </div>
           ))}
         </div>
       </div>

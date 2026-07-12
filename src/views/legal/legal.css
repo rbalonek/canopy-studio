@@ -1,0 +1,112 @@
+/* Public legal pages (/legal/*) — reachable signed-out, so they only rely
+   on tokens.css + this file. Prose defaults scoped under .legal-prose. */
+
+.legal-shell {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--fg);
+  display: flex;
+  flex-direction: column;
+}
+
+.legal-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 32px;
+  border-bottom: 1px solid var(--border);
+}
+
+.legal-nav {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+
+.legal-nav a {
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--fg-2);
+  text-decoration: none;
+}
+
+.legal-nav a:hover {
+  background: var(--bg-2);
+}
+
+.legal-nav a.on {
+  color: var(--fg);
+  background: var(--bg-2);
+}
+
+.legal-prose {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--fg-1, var(--fg));
+}
+
+.legal-prose h1 {
+  font-size: 26px;
+  line-height: 34px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0 0 4px;
+}
+
+.legal-prose .legal-updated {
+  font-size: 12px;
+  color: var(--fg-2);
+  margin-bottom: 32px;
+}
+
+.legal-prose h2 {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 32px 0 8px;
+}
+
+.legal-prose h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 20px 0 6px;
+}
+
+.legal-prose p {
+  margin: 0 0 12px;
+}
+
+.legal-prose ul {
+  margin: 0 0 12px;
+  padding-left: 22px;
+}
+
+.legal-prose li {
+  margin-bottom: 6px;
+}
+
+.legal-prose a {
+  color: var(--accent);
+}
+
+.legal-prose strong {
+  color: var(--fg);
+}
+
+.legal-footer {
+  margin-top: auto;
+  padding: 20px 32px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--fg-2);
+  display: flex;
+  gap: 16px;
+}
+
+.legal-footer a {
+  color: var(--fg-2);
+}

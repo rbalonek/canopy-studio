@@ -21,19 +21,24 @@ supabase start                     # one-time ~5-min image pull, then fast
 npm run dev                        # http://localhost:5173
 ```
 
-Hit `/` — redirects to `/dev`. The full design reference is browseable
-under `/dev/*` (Overview, Clients, Ad Studio, Brand Intelligence, etc).
+Hit `/` — login (or your workspace if signed in). The full design
+reference is browseable under `/dev/*` (Overview, Clients, Ad Studio,
+Brand Intelligence, etc).
 
 ## Routes
 
-- **`/dev/*`** — design reference / wireframe mode. No auth. Reads through
-  the `DataProvider` interface — currently the local Supabase by default,
-  falls back to in-memory mock for any methods whose tables haven't
-  been migrated yet.
-- **`/`** — reserved for the live, auth-gated product. Currently just
-  redirects to `/dev`. Will become: login → onboarding → `/app/*`.
-- **`/app/*`** — (not yet) the live product, mounting the same shell as
-  `/dev` but with auth and workspace-scoped reads.
+- **`/`** — live gate: login when signed out; when authed, redirects to
+  `/onboard` (no workspace yet) or `/app/<slug>` (first workspace).
+- **`/app/:slug/*`** — the live product: auth-gated, workspace-scoped,
+  Supabase provider, RLS does the tenant isolation. The sidebar lists
+  only routes flagged `live` in `src/routes.ts`.
+- **`/dev/*`** — design reference / wireframe mode. No auth, mock
+  provider. Every wireframe view stays browsable here even before (or
+  without) going live.
+- **`/legal/*`** — public legal pages (privacy, terms, data deletion).
+  No auth — Meta/Google app review require login-free URLs.
+
+See [`ROADMAP.md`](ROADMAP.md) for what's live vs. still being wired up.
 
 ## Data layer
 

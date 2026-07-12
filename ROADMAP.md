@@ -43,22 +43,23 @@ one-click Approve→Publish (ads always PAUSED; organic posts confirm-first).
 
 ## Phase 1 — Legal pages, login cleanup, Google sign-in
 
-- [ ] `src/views/legal/` — `LegalLayout.tsx` (public shell) + `Privacy.tsx`,
+- [x] `src/views/legal/` — `LegalLayout.tsx` (public shell) + `Privacy.tsx`,
       `Terms.tsx`, `DataDeletion.tsx`. Privacy covers Meta Platform Data
       handling/retention/deletion **and** the Google API Services User Data
       Policy Limited Use disclosure (verbatim phrase). DataDeletion documents
       the Phase 4 callback. Terms include AI-content disclaimer + payment
-      placeholder.
-- [ ] `src/App.tsx` — `/legal/*` routes outside the auth gates.
-- [ ] `src/views/Login.tsx` — strip "Redwood Digital Strategies" branding +
+      placeholder. *Owner to skim; contact address is
+      support@canopystudio.app — create the mailbox or change it.*
+- [x] `src/App.tsx` — `/legal/*` routes outside the auth gates.
+- [x] `src/views/Login.tsx` — strip "Redwood Digital Strategies" branding +
       fake testimonial; real links to `/legal/terms` + `/legal/privacy`; hide
       azure/apple buttons until configured.
-- [ ] README quick pass — remove stale "/app not yet" claim.
+- [x] README quick pass — remove stale "/app not yet" claim.
 - [ ] Manual: enable Google provider in Supabase dashboard, production Site
       URL + redirect allow-list.
-      Status: not started
+      Status: not started — needs the Phase 0 Google OAuth client id/secret
 - [ ] Manual: add legal URLs to Meta app settings + Google consent screen.
-      Status: blocked on legal pages deployed
+      Status: pages built; blocked on production deploy + Phase 0 apps existing
 
 ## Phase 2 — Profile docs + BYO provider keys
 
