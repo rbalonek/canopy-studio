@@ -151,8 +151,15 @@ manual System-User paste stays as an "Advanced" option.
       ships when the provider is enabled in the Supabase dashboard (a
       listed-but-disabled provider just errors on click).
 - [x] `config.toml`: `verify_jwt=false` for `meta-oauth`, `meta-data-deletion`.
+- [x] Asset picker: `meta-oauth` POST `action:'assets'` (member-gated) lists
+      the ad accounts + Pages (+ linked IG) visible to the stored credential;
+      `AdAccountsTab`'s connection form gets "Browse connected account"
+      dropdowns that fill account/page/IG ids (works with OAuth *or* the
+      existing manual tokens). Deployed 2026-07-12.
 - [ ] Manual: Meta app redirect URI + Data Deletion Callback URL + legal URLs.
-      Status: blocked on Phase 1
+      Status: in progress 2026-07-12 — app creation + redirect/deletion URLs
+      don't need Phase 1 (Dev Mode works for own-BM accounts without legal
+      URLs); only the Live-mode switch is blocked on the production deploy.
 - [ ] Manual: **App Review** — `pages_manage_posts`, `pages_read_engagement`,
       `instagram_business_content_publish`, `instagram_business_basic`,
       `ads_management`, `business_management`, Page Public Metadata Access,

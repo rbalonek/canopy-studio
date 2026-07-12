@@ -676,6 +676,15 @@ function Field({
   );
 }
 
+type MetaAssets = {
+  adAccounts: { id: string; name: string | null }[];
+  pages: {
+    id: string;
+    name: string | null;
+    ig: { id: string; username: string | null } | null;
+  }[];
+};
+
 function ConnectionForm({
   clientId,
   existing,
@@ -687,12 +696,47 @@ function ConnectionForm({
   onSaved: () => void;
   onCancel?: () => void;
 }) {
+  const workspace = useWorkspace();
   const [accountId, setAccountId] = useState(existing?.accountId ?? '');
   const [accessToken, setAccessToken] = useState('');
   const [pageId, setPageId] = useState(existing?.pageId ?? '');
   const [igAccountId, setIgAccountId] = useState(existing?.instagramBusinessAccountId ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [assets, setAssets] = useState<MetaAssets | null>(null);
+  const [loadingAssets, setLoadingAssets] = useState(false);
+  const [assetsErr, setAssetsErr] = useState<string | null>(null);
+
+  /** Pull the ad accounts + Pages the stored credential can see (workspace
+   * Facebook connection, or this client's own token) so the ids below can
+   * be picked instead of pasted. The token never reaches the browser. */
+  async function browseAssets() {
+    if (!supabase || !workspace) return;
+    setLoadingAssets(true);
+    setAssetsErr(null);
+    const { data, error: fnErr } = await supabase.functions.invoke('meta-oauth', {
+      body: { action: 'assets', workspace_id: workspace.id, client_id: clientId },
+    });
+    setLoadingAssets(false);
+    if (fnErr || !data?.ok) {
+      setAssetsErr(await invokeErrorText(data, fnErr));
+      return;
+    }
+    setAssets({
+      adAccounts: (data.ad_accounts as { id: string; name: string | null }[]) ?? [],
+      pages: ((data.pages as any[]) ?? []).map((p) => ({
+        id: p.id as string,
+        name: (p.name as string) ?? null,
+        ig: p.instagram_business_account
+          ? {
+              id: p.instagram_business_account.id as string,
+              username: (p.instagram_business_account.username as string) ?? null,
+            }
+          : null,
+      })),
+    });
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -732,11 +776,73 @@ function ConnectionForm({
       <div className="stack gap-4">
         <h2 className="h2">{existing ? 'Update Meta credentials' : 'Connect a Meta account'}</h2>
         <div className="meta">
-          Paste the long-lived access token + IDs from your Meta Business / Graph API Explorer.
-          We'll use these to pull campaign performance and post via the Marketing + Pages APIs.
-          OAuth will replace this form once the Meta app review is approved.
+          Assign this client's ad account, Facebook Page, and Instagram account. If the workspace
+          is connected with Facebook (Settings → Connections), pick them below and leave the token
+          blank — the workspace connection covers the API calls. Otherwise paste IDs + a token
+          manually.
         </div>
       </div>
+
+      <div className="row gap-8" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          className="btn sm"
+          onClick={browseAssets}
+          disabled={loadingAssets || submitting}
+        >
+          {loadingAssets ? 'Loading…' : assets ? 'Reload accounts' : 'Browse connected account'}
+        </button>
+        {assetsErr && (
+          <span className="meta" style={{ color: 'var(--danger, #c33)', fontSize: 12 }}>
+            ⚠ {assetsErr}
+          </span>
+        )}
+      </div>
+
+      {assets && (
+        <div className="grid grid-2 gap-12" style={{ gridTemplateColumns: '1fr 1fr' }}>
+          <label className="stack gap-4">
+            <span className="meta">Ad account ({assets.adAccounts.length} available)</span>
+            <select
+              value={accountId}
+              onChange={(e) => setAccountId(e.target.value)}
+              style={inputStyle}
+              disabled={submitting}
+            >
+              <option value="">— choose —</option>
+              {assets.adAccounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name ? `${a.name} (${a.id})` : a.id}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="stack gap-4">
+            <span className="meta">Facebook Page ({assets.pages.length} available)</span>
+            <select
+              value={pageId}
+              onChange={(e) => {
+                const page = assets.pages.find((p) => p.id === e.target.value);
+                setPageId(e.target.value);
+                setIgAccountId(page?.ig?.id ?? '');
+              }}
+              style={inputStyle}
+              disabled={submitting}
+            >
+              <option value="">— choose —</option>
+              {assets.pages.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name ? `${p.name} (${p.id})` : p.id}
+                  {p.ig ? ` · IG @${p.ig.username ?? p.ig.id}` : ''}
+                </option>
+              ))}
+            </select>
+            <span className="meta" style={{ fontSize: 11 }}>
+              Picking a Page auto-fills its linked Instagram Business account.
+            </span>
+          </label>
+        </div>
+      )}
 
       <label className="stack gap-4">
         <span className="meta">Ad Account ID</span>
@@ -766,8 +872,9 @@ function ConnectionForm({
           disabled={submitting}
         />
         <span className="meta" style={{ fontSize: 11 }}>
-          Long-lived user token or system user token. Generate via Graph API Explorer → Get
-          Token → extend at developers.facebook.com/tools/debug/accesstoken.
+          Optional when the workspace is connected with Facebook — leave blank to use that
+          connection. Otherwise: long-lived user or system user token, via Graph API Explorer →
+          Get Token → extend at developers.facebook.com/tools/debug/accesstoken.
         </span>
       </label>
 

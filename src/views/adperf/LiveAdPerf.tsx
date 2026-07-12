@@ -2,14 +2,22 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../../auth/supabaseClient';
 import {
-  METRICS_BY_KEY,
   PERIODS,
+  STATUS_FILTERS,
   aggregate,
   formatMetric,
+  indexMetrics,
+  matchesStatusFilter,
+  metricsFor,
   normalizeCampaign,
+  resultUnit,
   type CampaignRow,
+  type MetricDef,
+  type Norm,
   type Period,
+  type StatusFilter,
 } from '../../lib/metaMetrics';
+import { MetricPicker, usePersistentSelection } from '../../components/MetricPicker';
 import { useWorkspace } from '../../workspace/WorkspaceProvider';
 
 /**
@@ -28,7 +36,23 @@ type Row = CampaignRow & {
   platform?: string | null;
 };
 
-const COLUMNS = ['spend', 'results', 'costPerResult', 'impressions', 'clicks', 'ctr', 'roas'];
+const DEFAULT_COLUMNS = ['spend', 'results', 'costPerResult', 'impressions', 'clicks', 'ctr', 'roas'];
+
+/** Metric cell; the Results column also names what was counted ("56 purchases")
+ * since the resolved action type differs per client/campaign. */
+function MetricCell({ col, norm }: { col: MetricDef; norm: Norm }) {
+  const unit = col.key === 'results' ? resultUnit(norm.resultsType) : null;
+  return (
+    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+      {formatMetric(col.fmt, col.get(norm))}
+      {unit && (
+        <span className="meta" style={{ marginLeft: 5, fontSize: 11 }}>
+          {unit}
+        </span>
+      )}
+    </td>
+  );
+}
 
 export function LiveAdPerf() {
   const workspace = useWorkspace();
@@ -38,6 +62,8 @@ export function LiveAdPerf() {
   const [period, setPeriod] = useState<Period>('this_month');
   const [platform, setPlatform] = useState<'all' | 'meta' | 'google'>('all');
   const [clientFilter, setClientFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
+  const [colKeys, setColKeys] = usePersistentSelection('canopy.adPerfCols', DEFAULT_COLUMNS);
 
   useEffect(() => {
     let cancelled = false;
@@ -83,10 +109,11 @@ export function LiveAdPerf() {
     () =>
       rows.filter(
         (r) =>
+          matchesStatusFilter(r.status ?? '', statusFilter) &&
           (platform === 'all' || (r.platform ?? 'meta') === platform) &&
           (clientFilter === 'all' || r.client_id === clientFilter),
       ),
-    [rows, platform, clientFilter],
+    [rows, platform, clientFilter, statusFilter],
   );
 
   const ranked = useMemo(() => {
@@ -114,7 +141,11 @@ export function LiveAdPerf() {
   if (!workspace) return null;
 
   const prefix = `/app/${workspace.slug}`;
-  const cols = COLUMNS.map((k) => METRICS_BY_KEY[k]).filter(Boolean);
+  // Full catalog for this data (curated + auto-discovered action types);
+  // stale persisted keys not present in the data drop out at render time.
+  const availableMetrics = metricsFor(filtered, period);
+  const byKey = indexMetrics(availableMetrics);
+  const cols = colKeys.map((k) => byKey[k]).filter(Boolean);
 
   return (
     <div className="content wide">
@@ -122,7 +153,8 @@ export function LiveAdPerf() {
         <div className="stack gap-4">
           <h1 className="h0">Ad Performance</h1>
           <span className="meta">
-            Every client's campaigns, one leaderboard · {ranked.length} active of {filtered.length}
+            Every client's campaigns, one leaderboard · {ranked.length} with activity of{' '}
+            {filtered.length} {statusFilter === 'all' ? 'total' : statusFilter}
           </span>
         </div>
         <div className="row gap-8" style={{ flexWrap: 'wrap' }}>
@@ -130,6 +162,17 @@ export function LiveAdPerf() {
             {PERIODS.map((p) => (
               <div key={p.id} className={`tab ${period === p.id ? 'on' : ''}`} onClick={() => setPeriod(p.id)}>
                 {p.label}
+              </div>
+            ))}
+          </div>
+          <div className="tabs">
+            {STATUS_FILTERS.map((f) => (
+              <div
+                key={f.id}
+                className={`tab ${statusFilter === f.id ? 'on' : ''}`}
+                onClick={() => setStatusFilter(f.id)}
+              >
+                {f.label}
               </div>
             ))}
           </div>
@@ -161,6 +204,12 @@ export function LiveAdPerf() {
               </option>
             ))}
           </select>
+          <MetricPicker
+            selected={colKeys}
+            onChange={setColKeys}
+            metrics={availableMetrics}
+            label="Columns"
+          />
         </div>
       </div>
 
@@ -203,9 +252,7 @@ export function LiveAdPerf() {
                         </td>
                         <td className="meta">{g.count}</td>
                         {cols.map((c) => (
-                          <td key={c.key} style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                            {formatMetric(c.fmt, c.get(g.norm))}
-                          </td>
+                          <MetricCell key={c.key} col={c} norm={g.norm} />
                         ))}
                       </tr>
                     ))}
@@ -213,9 +260,7 @@ export function LiveAdPerf() {
                       <td>Workspace total</td>
                       <td className="meta">{filtered.length}</td>
                       {cols.map((c) => (
-                        <td key={c.key} style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                          {formatMetric(c.fmt, c.get(total))}
-                        </td>
+                        <MetricCell key={c.key} col={c} norm={total} />
                       ))}
                     </tr>
                   </tbody>
@@ -263,9 +308,7 @@ export function LiveAdPerf() {
                         </span>
                       </td>
                       {cols.map((c) => (
-                        <td key={c.key} style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                          {formatMetric(c.fmt, c.get(norm))}
-                        </td>
+                        <MetricCell key={c.key} col={c} norm={norm} />
                       ))}
                     </tr>
                   ))}

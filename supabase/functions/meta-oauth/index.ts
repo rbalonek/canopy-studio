@@ -1,12 +1,20 @@
 // meta-oauth
 //
-// Facebook Login for Business connect flow. Two entry points on one
+// Facebook Login for Business connect flow. Three entry points on one
 // function (the OAuth redirect URI must be a single stable URL):
 //
 //   POST (authed, workspace-owner-gated)
 //     { action: 'start', workspace_id, client_id?, return_to }
 //     → inserts a single-use oauth_states row and returns the
 //       facebook.com dialog URL for the browser to navigate to.
+//
+//   POST (authed, workspace-member-gated)
+//     { action: 'assets', workspace_id, client_id? }
+//     → lists the ad accounts and Pages (+ linked IG business accounts)
+//       visible to the stored credential — same resolution order as the
+//       refresh/publish functions (client override → workspace master →
+//       legacy meta_accounts) — so the UI can offer pickers instead of
+//       hand-pasted ids. The token itself never reaches the browser.
 //
 //   GET ?code=…&state=…   (the redirect back from Meta)
 //     verify_jwt = false — the browser arrives from facebook.com with no
@@ -25,7 +33,11 @@
 
 // deno-lint-ignore-file no-explicit-any
 import { CORS, json } from '../_shared/cors.ts';
-import { authenticate, serviceClient } from '../_shared/auth.ts';
+import {
+  assertWorkspaceMember,
+  authenticate,
+  serviceClient,
+} from '../_shared/auth.ts';
 
 const GRAPH = 'https://graph.facebook.com/v21.0';
 const SCOPES = [
@@ -41,20 +53,27 @@ function redirectUri(): string {
   return `${Deno.env.get('SUPABASE_URL')}/functions/v1/meta-oauth`;
 }
 
+type PostBody = {
+  action?: string;
+  workspace_id?: string;
+  client_id?: string;
+  return_to?: string;
+};
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method === 'GET') return await handleCallback(req);
-  return await handleStart(req);
+  try {
+    const body = (await req.json()) as PostBody;
+    if (body.action === 'assets') return await handleAssets(req, body);
+    return await handleStart(req, body);
+  } catch (e) {
+    return json({ ok: false, error: (e as Error).message }, 500);
+  }
 });
 
-async function handleStart(req: Request): Promise<Response> {
+async function handleStart(req: Request, body: PostBody): Promise<Response> {
   try {
-    const body = (await req.json()) as {
-      action?: string;
-      workspace_id?: string;
-      client_id?: string;
-      return_to?: string;
-    };
     if (body.action !== 'start' || !body.workspace_id) {
       return json({ ok: false, error: 'action "start" and workspace_id are required' }, 400);
     }
@@ -200,5 +219,102 @@ async function handleCallback(req: Request): Promise<Response> {
   } catch (e) {
     console.error('[meta-oauth] exchange failed:', (e as Error).message);
     return back(`meta=error&reason=${encodeURIComponent((e as Error).message)}`);
+  }
+}
+
+/** Same resolution order as meta-refresh-client / publish-meta-*: a
+ * per-client app override beats the workspace master, which beats the
+ * legacy per-client meta_accounts token. */
+async function resolveStoredToken(
+  service: ReturnType<typeof serviceClient>,
+  workspaceId: string,
+  clientId: string | null,
+): Promise<string | null> {
+  if (clientId) {
+    const { data } = await service
+      .from('client_meta_credentials')
+      .select('access_token')
+      .eq('client_id', clientId)
+      .maybeSingle();
+    if (data?.access_token) return data.access_token as string;
+  }
+  const { data: ws } = await service
+    .from('workspace_meta_credentials')
+    .select('access_token')
+    .eq('workspace_id', workspaceId)
+    .maybeSingle();
+  if (ws?.access_token) return ws.access_token as string;
+  if (clientId) {
+    const { data: legacy } = await service
+      .from('meta_accounts')
+      .select('access_token')
+      .eq('client_id', clientId)
+      .maybeSingle();
+    if (legacy?.access_token) return legacy.access_token as string;
+  }
+  return null;
+}
+
+/** Paginated Graph list call. `path` already carries its ?fields=… query. */
+async function graphList(path: string, token: string, cap = 500): Promise<any[]> {
+  const out: any[] = [];
+  let url: string | null = `${GRAPH}/${path}&limit=100&access_token=${encodeURIComponent(token)}`;
+  while (url && out.length < cap) {
+    const resp = await fetch(url);
+    const body = (await resp.json()) as any;
+    if (!resp.ok) throw new Error(body?.error?.message ?? `Graph error on ${path}`);
+    out.push(...((body.data as any[]) ?? []));
+    url = (body.paging?.next as string | undefined) ?? null;
+  }
+  return out.slice(0, cap);
+}
+
+async function handleAssets(req: Request, body: PostBody): Promise<Response> {
+  if (!body.workspace_id) {
+    return json({ ok: false, error: 'workspace_id is required' }, 400);
+  }
+  const caller = await authenticate(req);
+  if (!caller) return json({ ok: false, error: 'Invalid session' }, 401);
+  if (!(await assertWorkspaceMember(caller, body.workspace_id))) {
+    return json({ ok: false, error: 'Not a member of this workspace' }, 403);
+  }
+
+  const service = serviceClient();
+  const token = await resolveStoredToken(service, body.workspace_id, body.client_id ?? null);
+  if (!token) {
+    return json(
+      {
+        ok: false,
+        error:
+          'No Meta connection yet — connect with Facebook in Settings → Connections (or paste a token) first.',
+      },
+      400,
+    );
+  }
+
+  try {
+    const [accounts, pages] = await Promise.all([
+      graphList('me/adaccounts?fields=account_id,name', token),
+      graphList('me/accounts?fields=id,name,instagram_business_account{id,username}', token),
+    ]);
+    return json({
+      ok: true,
+      ad_accounts: accounts.map((a) => ({
+        id: `act_${a.account_id ?? String(a.id).replace(/^act_/, '')}`,
+        name: (a.name as string) ?? null,
+      })),
+      pages: pages.map((p) => ({
+        id: String(p.id),
+        name: (p.name as string) ?? null,
+        instagram_business_account: p.instagram_business_account
+          ? {
+              id: String(p.instagram_business_account.id),
+              username: (p.instagram_business_account.username as string) ?? null,
+            }
+          : null,
+      })),
+    });
+  } catch (e) {
+    return json({ ok: false, error: (e as Error).message }, 400);
   }
 }

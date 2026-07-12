@@ -6,12 +6,15 @@ import { MetricPicker, usePersistentSelection } from '../../components/MetricPic
 import {
   DEFAULT_CAMPAIGN_COLUMNS,
   PERIODS,
+  STATUS_FILTERS,
   formatMetric,
   indexMetrics,
+  matchesStatusFilter,
   metricsFor,
   normalizeCampaign,
   type CampaignRow,
   type Period,
+  type StatusFilter,
 } from '../../lib/metaMetrics';
 import { useWorkspace } from '../../workspace/WorkspaceProvider';
 
@@ -52,26 +55,6 @@ const STRATEGY_OPTIONS = [
   'Awareness',
   'Unknown',
 ];
-
-type StatusFilter = 'active' | 'paused' | 'archived' | 'all';
-const STATUS_FILTERS: { id: StatusFilter; label: string }[] = [
-  { id: 'active', label: 'Active' },
-  { id: 'paused', label: 'Paused' },
-  { id: 'archived', label: 'Archived' },
-  { id: 'all', label: 'All' },
-];
-function matchesFilter(status: string, f: StatusFilter): boolean {
-  switch (f) {
-    case 'active':
-      return status === 'ACTIVE';
-    case 'paused':
-      return status === 'PAUSED';
-    case 'archived':
-      return status === 'ARCHIVED' || status === 'DELETED';
-    case 'all':
-      return true;
-  }
-}
 
 const SELECT_COLUMNS =
   'id, client_id, name, status, strategy, ad_account_id, last_refreshed_at, ' +
@@ -155,7 +138,7 @@ export function CampaignsTable(props: Props) {
     );
   }
 
-  const visible = rows.filter((r) => matchesFilter(r.status, statusFilter));
+  const visible = rows.filter((r) => matchesStatusFilter(r.status, statusFilter));
   const lastRefresh = rows.reduce<string | null>((latest, r) => {
     if (!r.last_refreshed_at) return latest;
     if (!latest) return r.last_refreshed_at;
