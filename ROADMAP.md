@@ -156,6 +156,14 @@ manual System-User paste stays as an "Advanced" option.
       `AdAccountsTab`'s connection form gets "Browse connected account"
       dropdowns that fill account/page/IG ids (works with OAuth *or* the
       existing manual tokens). Deployed 2026-07-12.
+- [x] Import flow (`fetchMetaAssets` in `src/lib/metaAssets.ts`):
+      `MetaImportClientsModal` — select-all/specific ad accounts → creates
+      clients + `meta_accounts` rows (Page pre-matched by name, IG auto) +
+      first refresh per client; auto-opens on `?meta=connected` in Settings,
+      also via Settings "Import clients" + Clients "Import from Meta".
+      `ClientFormModal` create mode gets the same ad-account/Page dropdowns.
+      Follow-up (not built): auto-import of accounts granted later — today
+      they surface as unchecked "new" rows on the next modal open.
 - [ ] Manual: Meta app redirect URI + Data Deletion Callback URL + legal URLs.
       Status: in progress 2026-07-12 — app creation + redirect/deletion URLs
       don't need Phase 1 (Dev Mode works for own-BM accounts without legal

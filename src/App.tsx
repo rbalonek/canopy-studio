@@ -130,7 +130,7 @@ function useWorkspaces(): Workspace[] | null {
       );
       const { data } = await supabase!
         .from('workspaces')
-        .select('id, name, slug, mode, owner_id');
+        .select('id, name, slug, mode, owner_id, logo_url, tagline');
       setWorkspaces(
         (data ?? []).map((r) => ({
           id: r.id as string,
@@ -138,6 +138,8 @@ function useWorkspaces(): Workspace[] | null {
           slug: r.slug as string,
           mode: r.mode as Workspace['mode'],
           ownerId: r.owner_id as string,
+          logoUrl: (r.logo_url as string | null) ?? null,
+          tagline: (r.tagline as string | null) ?? null,
         })),
       );
     })();

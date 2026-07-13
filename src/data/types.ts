@@ -428,6 +428,10 @@ export type Workspace = {
   slug: string;
   mode: WorkspaceMode;
   ownerId: string;
+  /** Optional workspace logo (public URL); doubles as the in-app favicon. */
+  logoUrl?: string | null;
+  /** Optional short tagline, filled by the agency self-scrape. */
+  tagline?: string | null;
 };
 
 export type WorkspaceMember = {

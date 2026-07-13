@@ -1,4 +1,5 @@
 import { Link, NavLink, Outlet } from 'react-router-dom';
+import { CanopyMark } from '../../components/CanopyMark';
 import './legal.css';
 
 /**
@@ -10,7 +11,7 @@ export function LegalLayout() {
   return (
     <div className="legal-shell">
       <header className="legal-header">
-        <div className="logo-mark">C</div>
+        <CanopyMark size={22} title="CanopyStudio" />
         <Link to="/" style={{ fontWeight: 500, color: 'var(--fg)', textDecoration: 'none' }}>
           CanopyStudio
         </Link>

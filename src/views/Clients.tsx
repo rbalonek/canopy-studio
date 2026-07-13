@@ -8,6 +8,7 @@ import type { ClientCard } from '../data/types';
 import { useAppState } from '../shell/AppState';
 import { useWorkspace } from '../workspace/WorkspaceProvider';
 import { ClientFormModal } from './ClientFormModal';
+import { MetaImportClientsModal } from './MetaImportClientsModal';
 
 const FILTER_CHIPS = ['Active campaigns', 'Has META', 'Multi-location', 'Brand 100%', 'Industry: Dental'];
 
@@ -20,9 +21,11 @@ export function Clients() {
   const label = state.mode === 'agency' ? 'Clients' : 'Locations';
   const singular = state.mode === 'agency' ? 'client' : 'location';
 
-  const { data: cards } = useQuery<ClientCard[]>((p) => p.listClientCards());
+  const [refreshKey, setRefreshKey] = useState(0);
+  const { data: cards } = useQuery<ClientCard[]>((p) => p.listClientCards(), [refreshKey]);
   const [layout, setLayout] = useState<Layout>('grid');
   const [showAdd, setShowAdd] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const shellPrefix = workspace ? `/app/${workspace.slug}` : '/dev';
   const goToClient = (id: string) => navigate(`${shellPrefix}/clients/${id}`);
 
@@ -110,6 +113,11 @@ export function Clients() {
               <Icon name="list" size={12} />
             </button>
           </div>
+          {workspace && (
+            <button className="btn" onClick={() => setShowImport(true)}>
+              <Icon name="link" size={13} /> Import from Meta
+            </button>
+          )}
           <button className="btn primary" onClick={() => setShowAdd(true)}>
             <Icon name="plus" size={13} /> Add {singular}
           </button>
@@ -199,6 +207,14 @@ export function Clients() {
           workspaceId={workspace?.id ?? null}
           onClose={() => setShowAdd(false)}
           onSaved={goToClient}
+        />
+      )}
+      {showImport && workspace && (
+        <MetaImportClientsModal
+          workspaceId={workspace.id}
+          singular={singular}
+          onClose={() => setShowImport(false)}
+          onImported={() => setRefreshKey((k) => k + 1)}
         />
       )}
     </div>

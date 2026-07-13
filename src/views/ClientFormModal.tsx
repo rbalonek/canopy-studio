@@ -3,6 +3,7 @@ import { supabase } from '../auth/supabaseClient';
 import { Icon } from '../components/Icon';
 import { enqueueJob } from '../data/useJob';
 import type { Industry } from '../data/types';
+import { fetchMetaAssets, type MetaAssets } from '../lib/metaAssets';
 
 const INDUSTRIES: Industry[] = [
   'Dental / Healthcare',
@@ -53,6 +54,28 @@ export function ClientFormModal({
   const [loading, setLoading] = useState(!!existingId);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Optional Meta attachment (create mode): pick this client's ad account +
+  // Page from whatever the workspace connection can see, instead of pasting
+  // ids later in the Ad Accounts tab.
+  const [assets, setAssets] = useState<MetaAssets | null>(null);
+  const [assetsBusy, setAssetsBusy] = useState(false);
+  const [assetsErr, setAssetsErr] = useState<string | null>(null);
+  const [metaAccountId, setMetaAccountId] = useState('');
+  const [metaPageId, setMetaPageId] = useState('');
+  const [metaIgId, setMetaIgId] = useState('');
+
+  async function browseMeta() {
+    if (!workspaceId) return;
+    setAssetsBusy(true);
+    setAssetsErr(null);
+    try {
+      setAssets(await fetchMetaAssets(workspaceId));
+    } catch (e) {
+      setAssetsErr((e as Error).message);
+    }
+    setAssetsBusy(false);
+  }
 
   useEffect(() => {
     if (!existingId || !supabase) return;
@@ -186,6 +209,30 @@ export function ClientFormModal({
       return;
     }
     createdIdRef.current = clientId;
+
+    // Attach the picked Meta assets and kick a first campaign pull. Best
+    // effort — the client exists either way and the Ad Accounts tab can fix
+    // or retry any of this.
+    if (metaAccountId || metaPageId) {
+      const { error: metaErr } = await supabase.from('meta_accounts').upsert(
+        {
+          client_id: clientId,
+          account_id: metaAccountId || null,
+          page_id: metaPageId || null,
+          instagram_business_account_id: metaIgId || null,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'client_id' },
+      );
+      if (metaErr) {
+        console.warn('Meta attach failed:', metaErr.message);
+      } else if (metaAccountId) {
+        supabase.functions
+          .invoke('meta-refresh-client', { body: { client_id: clientId } })
+          .catch((e) => console.warn('Initial Meta refresh failed:', e));
+      }
+    }
+
     if (site && scrapeSite) {
       // Visible scrape: the modal shows progress, then lands on the client
       // with Scraped Pages done and Brand analysis running.
@@ -306,6 +353,74 @@ export function ClientFormModal({
                 ))}
               </select>
             </label>
+            {!existingId && workspaceId && (
+              <div className="stack gap-4">
+                <span className="meta">Meta account (optional)</span>
+                {!assets ? (
+                  <>
+                    <button
+                      type="button"
+                      className="btn sm"
+                      onClick={browseMeta}
+                      disabled={assetsBusy || submitting}
+                      style={{ alignSelf: 'flex-start' }}
+                    >
+                      {assetsBusy ? 'Loading…' : 'Choose from connected Meta account'}
+                    </button>
+                    {assetsErr && (
+                      <span className="meta" style={{ color: 'var(--danger, #c33)', fontSize: 11 }}>
+                        ⚠ {assetsErr}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <select
+                      className="input"
+                      value={metaAccountId}
+                      onChange={(e) => {
+                        setMetaAccountId(e.target.value);
+                        // Autofill the client name from the ad account.
+                        const acct = assets.adAccounts.find((a) => a.id === e.target.value);
+                        if (acct?.name && !name.trim()) setName(acct.name);
+                      }}
+                      disabled={submitting}
+                      style={{ ...inputStyle, appearance: 'auto' }}
+                    >
+                      <option value="">Ad account — none</option>
+                      {assets.adAccounts.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name ? `${a.name} (${a.id})` : a.id}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      className="input"
+                      value={metaPageId}
+                      onChange={(e) => {
+                        const page = assets.pages.find((p) => p.id === e.target.value);
+                        setMetaPageId(e.target.value);
+                        setMetaIgId(page?.ig?.id ?? '');
+                      }}
+                      disabled={submitting}
+                      style={{ ...inputStyle, appearance: 'auto' }}
+                    >
+                      <option value="">Facebook Page — none</option>
+                      {assets.pages.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name ? `${p.name} (${p.id})` : p.id}
+                          {p.ig ? ` · IG @${p.ig.username ?? p.ig.id}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="meta" style={{ fontSize: 11 }}>
+                      Picking a Page auto-attaches its Instagram account. Campaigns pull
+                      automatically after create.
+                    </span>
+                  </>
+                )}
+              </div>
+            )}
             <label className="row gap-8" style={{ alignItems: 'center', cursor: 'pointer' }}>
               <input
                 type="checkbox"
@@ -363,7 +478,7 @@ export function ClientFormModal({
   );
 }
 
-function slugify(s: string): string {
+export function slugify(s: string): string {
   return s
     .toLowerCase()
     .trim()
@@ -372,7 +487,7 @@ function slugify(s: string): string {
     .slice(0, 40);
 }
 
-function randomSuffix(): string {
+export function randomSuffix(): string {
   return Math.random().toString(36).slice(2, 6);
 }
 

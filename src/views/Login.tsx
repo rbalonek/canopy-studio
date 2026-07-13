@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth, type OAuthProvider } from '../auth/AuthProvider';
+import { CanopyMark } from '../components/CanopyMark';
 
 type Mode = 'login' | 'signup' | 'reset';
 
@@ -102,7 +103,7 @@ export function Login() {
     >
       <div style={{ padding: '48px 64px', display: 'flex', flexDirection: 'column' }}>
         <div className="row gap-8">
-          <div className="logo-mark">C</div>
+          <CanopyMark size={22} title="CanopyStudio" />
           <span style={{ fontWeight: 500 }}>CanopyStudio</span>
         </div>
 
@@ -115,6 +116,9 @@ export function Login() {
             maxWidth: 420,
           }}
         >
+          <div style={{ marginBottom: 16 }}>
+            <CanopyMark size={52} title="CanopyStudio" />
+          </div>
           <h1 className="h0" style={{ marginBottom: 6 }}>
             CanopyStudio
           </h1>

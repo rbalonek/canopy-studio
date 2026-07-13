@@ -3,6 +3,7 @@ import { supabase } from '../auth/supabaseClient';
 import { Empty } from '../components/Empty';
 import { Icon } from '../components/Icon';
 import { useWorkspace } from '../workspace/WorkspaceProvider';
+import { MetaImportClientsModal } from './MetaImportClientsModal';
 import { AccountTab } from './settings/AccountTab';
 import { AiSettingsTab } from './settings/AiSettingsTab';
 import { ApiKeysPanel } from './settings/ApiKeysPanel';
@@ -151,6 +152,10 @@ function WorkspaceMetaPanel() {
       ? '✓ Facebook connected — the workspace token was saved.'
       : `⚠ Facebook connect failed: ${params.get('reason') ?? 'unknown error'}`;
   });
+  // Fresh connect → offer to bring the visible ad accounts in as clients.
+  const [showImport, setShowImport] = useState(
+    () => new URLSearchParams(window.location.search).get('meta') === 'connected',
+  );
 
   async function refresh() {
     if (!supabase || !workspace) {
@@ -221,6 +226,9 @@ function WorkspaceMetaPanel() {
         </div>
         {creds?.hasToken && !editing && (
           <div className="row gap-8">
+            <button className="btn sm" onClick={() => setShowImport(true)}>
+              <Icon name="plus" size={12} /> Import clients
+            </button>
             <button className="btn primary sm" onClick={connectWithFacebook} disabled={oauthBusy}>
               {oauthBusy ? 'Redirecting…' : 'Reconnect with Facebook'}
             </button>
@@ -328,6 +336,13 @@ function WorkspaceMetaPanel() {
             with each client.
           </div>
         </div>
+      )}
+
+      {showImport && workspace && (
+        <MetaImportClientsModal
+          workspaceId={workspace.id}
+          onClose={() => setShowImport(false)}
+        />
       )}
     </div>
   );

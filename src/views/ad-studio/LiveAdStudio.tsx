@@ -12,6 +12,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { supabase } from '../../auth/supabaseClient';
+import { META_WRITE_ENABLED } from '../../config/features';
 import { Icon } from '../../components/Icon';
 import { useWorkspace } from '../../workspace/WorkspaceProvider';
 import { enqueueJob, useJob } from '../../data/useJob';
@@ -591,7 +592,10 @@ export function LiveAdStudio({
             workspaceId={workspace.id}
             clientId={clientId}
           />
-          {generationId && medium !== 'GOOGLE_ADS' && !!results.meta && (
+          {/* Publishing an ad WRITES to Meta — hidden in the default
+              read-only build (VITE_META_WRITE off). Generating and saving
+              copy stay live. */}
+          {META_WRITE_ENABLED && generationId && medium !== 'GOOGLE_ADS' && !!results.meta && (
             <PublishPanel generationId={generationId} hasLandingUrl={!!landingUrl.trim()} />
           )}
         </>

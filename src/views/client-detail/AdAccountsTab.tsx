@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { supabase } from '../../auth/supabaseClient';
 import { Icon } from '../../components/Icon';
 import { invokeErrorText } from '../../lib/invokeError';
+import { fetchMetaAssets, type MetaAssets } from '../../lib/metaAssets';
 import { useWorkspace } from '../../workspace/WorkspaceProvider';
 import { CampaignsTable } from '../campaigns/CampaignsTable';
 
@@ -676,15 +677,6 @@ function Field({
   );
 }
 
-type MetaAssets = {
-  adAccounts: { id: string; name: string | null }[];
-  pages: {
-    id: string;
-    name: string | null;
-    ig: { id: string; username: string | null } | null;
-  }[];
-};
-
 function ConnectionForm({
   clientId,
   existing,
@@ -715,27 +707,12 @@ function ConnectionForm({
     if (!supabase || !workspace) return;
     setLoadingAssets(true);
     setAssetsErr(null);
-    const { data, error: fnErr } = await supabase.functions.invoke('meta-oauth', {
-      body: { action: 'assets', workspace_id: workspace.id, client_id: clientId },
-    });
-    setLoadingAssets(false);
-    if (fnErr || !data?.ok) {
-      setAssetsErr(await invokeErrorText(data, fnErr));
-      return;
+    try {
+      setAssets(await fetchMetaAssets(workspace.id, clientId));
+    } catch (e) {
+      setAssetsErr((e as Error).message);
     }
-    setAssets({
-      adAccounts: (data.ad_accounts as { id: string; name: string | null }[]) ?? [],
-      pages: ((data.pages as any[]) ?? []).map((p) => ({
-        id: p.id as string,
-        name: (p.name as string) ?? null,
-        ig: p.instagram_business_account
-          ? {
-              id: p.instagram_business_account.id as string,
-              username: (p.instagram_business_account.username as string) ?? null,
-            }
-          : null,
-      })),
-    });
+    setLoadingAssets(false);
   }
 
   async function onSubmit(e: FormEvent) {

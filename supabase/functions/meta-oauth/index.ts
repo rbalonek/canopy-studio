@@ -40,13 +40,19 @@ import {
 } from '../_shared/auth.ts';
 
 const GRAPH = 'https://graph.facebook.com/v21.0';
+// Read-only scope set — matches the "Canopy Studio Read-Only" Facebook Login
+// configuration (FB_LOGIN_CONFIG_ID). When that config id is set the granted
+// scopes come from the Meta-side config and this list is only a fallback, but
+// it's kept read-only so a config-less environment can't silently request
+// write access. Write scopes (pages_manage_posts,
+// instagram_business_content_publish, ads_management) live behind a SEPARATE
+// write Login config + its own App Review — never add them here.
 const SCOPES = [
-  'pages_manage_posts',
-  'pages_read_engagement',
-  'instagram_business_basic',
-  'instagram_business_content_publish',
-  'ads_management',
+  'ads_read',
   'business_management',
+  'instagram_basic',
+  'pages_read_engagement',
+  'pages_show_list',
 ].join(',');
 
 function redirectUri(): string {
