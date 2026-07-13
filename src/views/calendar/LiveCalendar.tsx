@@ -12,6 +12,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../auth/supabaseClient';
+import { META_WRITE_ENABLED } from '../../config/features';
 import { Icon } from '../../components/Icon';
 import { useWorkspace } from '../../workspace/WorkspaceProvider';
 import { enqueueJob, useJob } from '../../data/useJob';
@@ -1077,7 +1078,9 @@ function PostEditor({
       </div>
 
       {/* ---- Publish / schedule (organic) ---- */}
-      {post.status !== 'draft' && (
+      {/* Write-to-Meta surface: hidden in the default read-only build
+          (VITE_META_WRITE off). Planning, drafting and Approve stay live. */}
+      {META_WRITE_ENABLED && post.status !== 'draft' && (
         <PublishPanel
           post={post}
           blocker={

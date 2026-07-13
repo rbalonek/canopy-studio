@@ -21,7 +21,9 @@ import { CampaignDetail } from '../views/campaigns/CampaignDetail';
 import { ScopedAdStudio } from '../views/campaigns/ScopedAdStudio';
 import { ClientDetail } from '../views/client-detail/ClientDetail';
 import { LocationDetail } from '../views/client-detail/LocationDetail';
+import { META_WRITE_ENABLED } from '../config/features';
 import { ROUTES, type RouteId } from '../routes';
+import { useWorkspace } from '../workspace/WorkspaceProvider';
 import { useAppState } from './AppState';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
@@ -59,6 +61,8 @@ type Props = {
 export function AppShell({ prefix }: Props) {
   const { state } = useAppState();
   const { pathname } = useLocation();
+  // Present under /app (WorkspaceProvider), null under the /dev showroom.
+  const workspace = useWorkspace();
 
   // Determine isFull from the active subpath (handles both ":/dev/auth" and
   // dynamic params like "/dev/clients/acme"). Fall back to false.
@@ -80,7 +84,15 @@ export function AppShell({ prefix }: Props) {
           <Routes>
             {ROUTES.map((r) => {
               const Element = VIEWS[r.id];
-              const element = Element ? <Element /> : (
+              // In the live read-only build, block write-to-Meta routes even
+              // by direct URL (the sidebar already hides them). /dev keeps
+              // them reachable as a design reference.
+              const blockedWrite = r.write && !META_WRITE_ENABLED && !!workspace;
+              const element = blockedWrite ? (
+                <Navigate to="" replace />
+              ) : Element ? (
+                <Element />
+              ) : (
                 <Placeholder title={r.label} note={`Route id: ${r.id}`} />
               );
               if (r.subpath === '') {

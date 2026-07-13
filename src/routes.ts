@@ -57,6 +57,13 @@ export type RouteDef = {
    * stop being mock-only.
    */
   live?: boolean;
+  /**
+   * Feature WRITES to Meta (publishing / scheduling / ad publishing).
+   * Gated behind the `META_WRITE_ENABLED` flag (`VITE_META_WRITE`): hidden
+   * from the sidebar and blocked at the route in the default read-only
+   * build, so the app stays consistent with the read-only Meta App Review.
+   */
+  write?: boolean;
 };
 
 export const SECTION_LABELS: Record<SidebarSection, string> = {
@@ -88,8 +95,8 @@ export const ROUTES: RouteDef[] = [
   { id: 'calendar',      subpath: 'calendar',      label: 'Content Calendar',  icon: 'calendar', section: 'workspace', ai: true, live: true },
   { id: 'ad-studio',     subpath: 'ad-studio',     label: 'Ad Studio',         icon: 'sparkles', section: 'workspace', ai: true, live: true },
   { id: 'brand',         subpath: 'brand',         label: 'Brand Intelligence', icon: 'brain',   section: 'workspace', live: true },
-  { id: 'approvals',     subpath: 'approvals',     label: 'Approvals',         icon: 'check',    section: 'workspace', live: true },
-  { id: 'publish',       subpath: 'publish',       label: 'Publishing Queue',  icon: 'queue',    section: 'workspace', live: true },
+  { id: 'approvals',     subpath: 'approvals',     label: 'Approvals',         icon: 'check',    section: 'workspace', live: true, write: true },
+  { id: 'publish',       subpath: 'publish',       label: 'Publishing Queue',  icon: 'queue',    section: 'workspace', live: true, write: true },
   { id: 'reports',       subpath: 'reports',       label: 'Reports',           icon: 'report',   section: 'workspace', live: true },
   { id: 'settings',      subpath: 'settings',      label: 'Settings',          icon: 'gear',     section: 'workspace', live: true },
   { id: 'billing',       subpath: 'billing',       label: 'Billing Detail',    icon: 'report',   section: 'workspace' },

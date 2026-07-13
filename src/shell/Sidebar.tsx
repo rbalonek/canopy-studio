@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { CanopyMark } from '../components/CanopyMark';
 import { Icon } from '../components/Icon';
+import { META_WRITE_ENABLED } from '../config/features';
 import { ROUTES, SECTION_LABELS, routePath, type SidebarSection } from '../routes';
 import { useWorkspace } from '../workspace/WorkspaceProvider';
 import { useAppState } from './AppState';
@@ -59,6 +60,10 @@ export function Sidebar({ prefix }: Props) {
       <div className="side-nav">
         {ROUTES.filter((r) => {
           if (r.hidden) return false;
+          // Write-to-Meta features are hidden in the default read-only build
+          // (keeps the app consistent with the read-only Meta App Review);
+          // set VITE_META_WRITE=1 to surface them for local write testing.
+          if (r.write && !META_WRITE_ENABLED) return false;
           // Live workspaces only list wired-up features; everything else
           // (design system, mock-only views, wireframe flows) stays
           // browsable under /dev.
