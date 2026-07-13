@@ -144,6 +144,10 @@ Everything AI runs through one serverless pipeline:
   maps job types to prompt builders — `copy_generation`,
   `creative_directions`, `expand_content`, `regenerate_single`,
   `website_analysis`, `competitor_analysis`, `account_analysis`,
+  `agency_analysis` (workspace-level self-scrape — reads the agency's own
+  site via `fetchSiteBrand`, writes the agency `profile_docs` row +
+  `workspaces.logo_url`/`tagline`; reuses `website_analysis` ai_settings via
+  `settingsTaskFor`, so no ai_settings.task constraint change),
   `send_report`, `test_prompt`. Adding an AI capability = adding a
   builder there.
 - **Prompts**: [`_shared/ai/prompts.ts`](supabase/functions/_shared/ai/prompts.ts)

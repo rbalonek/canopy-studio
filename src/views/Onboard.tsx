@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { CanopyMark } from '../components/CanopyMark';
 import { ProgressBanner } from '../components/ProgressBanner';
 
 const STEPS = [
@@ -17,7 +18,7 @@ export function Onboard() {
     <div className="content wide" style={{ maxWidth: 1100 }}>
       <div className="row between" style={{ marginBottom: 24 }}>
         <div className="row gap-8">
-          <div className="logo-mark">C</div>
+          <CanopyMark size={22} title="CanopyStudio" />
           <span style={{ fontWeight: 500 }}>CanopyStudio</span>
         </div>
         <a className="meta">Save and finish later →</a>

@@ -7,7 +7,7 @@
 // deno-lint-ignore-file no-explicit-any
 import type { ServiceClient } from '../auth.ts';
 import { notifyWorkspace, sendEmail, sendSlack } from '../notify.ts';
-import { landingPageSection } from '../scrape.ts';
+import { fetchSiteBrand, landingPageSection } from '../scrape.ts';
 import type { OrchestratedPromptSpec } from './orchestrator.ts';
 import { loadProfiles, loadSkills } from './orchestrator.ts';
 import {
@@ -1498,6 +1498,107 @@ Return valid JSON: { "headline": "...", "sentence": "..." }`,
   };
 };
 
+/** agency_analysis — the workspace-level counterpart of website_analysis.
+ * Reads the agency's OWN website (homepage + a couple of about/services
+ * pages) and writes the agency `profile_docs` row (the markdown injected into
+ * every AI task) plus workspace branding (tagline, and a scraped logo when
+ * none is set). Workspace-scoped — no client_id. */
+const agencyAnalysis: SpecBuilder = async (service, job) => {
+  const input = job.input ?? {};
+  const url = (input.url as string | undefined)?.trim();
+  if (!url) throw new Error('agency_analysis requires input.url');
+
+  const [site, skills] = await Promise.all([
+    fetchSiteBrand(url),
+    loadSkills(service, job.workspace_id, 'website_analysis'),
+  ]);
+  if (!site.text || site.text.length < 120) {
+    throw new Error(
+      `Could not read ${url} — it may be JavaScript-rendered or blocking bots. Fill the agency profile in manually.`,
+    );
+  }
+
+  return {
+    system:
+      'You are a brand strategist who profiles marketing agencies and businesses from their own website. Always respond with valid JSON.' +
+      skillsBlock(skills),
+    user: buildAgencyAnalysisPrompt(site.text, url, site.title),
+    reviewInstructions:
+      'Check the profile is grounded in the actual website copy (no invented services or claims), reads as a concise markdown brief, and the tagline is short (under ~12 words).',
+    json: true,
+    llmOptions: { temperature: 0.3 },
+    finalize: async (result: any) => {
+      const profileMd = String(result?.profile_markdown ?? '').trim();
+      const tagline = result?.tagline ? String(result.tagline).trim() : null;
+      const now = new Date().toISOString();
+
+      // Upsert the agency profile doc (client_id null). Select-then-write
+      // mirrors ProfileDocEditor rather than relying on a nulls-not-distinct
+      // upsert conflict target.
+      if (profileMd) {
+        const { data: existing } = await service
+          .from('profile_docs')
+          .select('id')
+          .eq('workspace_id', job.workspace_id)
+          .is('client_id', null)
+          .maybeSingle();
+        if (existing?.id) {
+          await service
+            .from('profile_docs')
+            .update({ content: profileMd, updated_at: now })
+            .eq('id', existing.id);
+        } else {
+          await service
+            .from('profile_docs')
+            .insert({ workspace_id: job.workspace_id, client_id: null, content: profileMd, updated_at: now });
+        }
+      }
+
+      // Fill workspace branding non-destructively: set the tagline / scraped
+      // logo only when the workspace doesn't already have one, so a re-scrape
+      // never clobbers a hand-picked logo or edited tagline.
+      const { data: ws } = await service
+        .from('workspaces')
+        .select('logo_url, tagline')
+        .eq('id', job.workspace_id)
+        .maybeSingle();
+      const patch: Record<string, unknown> = {};
+      if (tagline && !ws?.tagline) patch.tagline = tagline;
+      if (site.logo && !ws?.logo_url) patch.logo_url = site.logo;
+      if (Object.keys(patch).length) {
+        await service.from('workspaces').update(patch).eq('id', job.workspace_id);
+      }
+
+      return {
+        ...result,
+        saved: true,
+        profile_written: !!profileMd,
+        logo_found: site.logo,
+        logo_applied: !!patch.logo_url,
+        tagline_applied: !!patch.tagline,
+      };
+    },
+  };
+};
+
+function buildAgencyAnalysisPrompt(siteContent: string, url: string, title: string | null): string {
+  return `You are profiling a marketing agency (or a business that runs its own marketing) from its website so an AI copywriting platform always has accurate context about THIS company when it works on their clients' campaigns.
+
+WEBSITE: ${url}${title ? ` — "${title}"` : ''}
+
+WEBSITE CONTENT:
+${siteContent}
+
+Produce a JSON object with exactly these fields:
+{
+  "profile_markdown": "A concise markdown brief about this company, ready to drop into a system prompt. Use short ## sections and bullet points. Cover: who they are and what they do, the kinds of clients/industries they serve, their positioning and differentiators, their tone/voice, and any house rules or values evident from the site. Ground every statement in the website copy — do not invent facts, services, or clients. Aim for 150–350 words.",
+  "tagline": "A short one-line tagline for this company (under ~12 words), drawn from or faithful to their site.",
+  "name_suggestion": "The company's own name exactly as it appears on the site (for confirmation only)."
+}
+
+Respond with ONLY the JSON object.`;
+}
+
 const BUILDERS: Record<string, SpecBuilder> = {
   test_prompt: testPrompt,
   copy_generation: copyGeneration,
@@ -1508,6 +1609,7 @@ const BUILDERS: Record<string, SpecBuilder> = {
   location_detection: locationDetection,
   competitor_analysis: competitorAnalysis,
   account_analysis: accountAnalysis,
+  agency_analysis: agencyAnalysis,
   send_report: sendReport,
   content_plan: contentPlan,
 };
@@ -1524,5 +1626,9 @@ export function isKnownJobType(type: string): boolean {
  * uses the 'report_summary' settings (the LLM part of a report is the
  * narrative — sending isn't an AI mode). */
 export function settingsTaskFor(type: string): string {
-  return type === 'send_report' ? 'report_summary' : type;
+  if (type === 'send_report') return 'report_summary';
+  // The agency self-scrape reuses the brand-analysis model config — no
+  // separate ai_settings row (and no ai_settings.task constraint change).
+  if (type === 'agency_analysis') return 'website_analysis';
+  return type;
 }

@@ -1,6 +1,7 @@
 import { Fragment } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
+import { CanopyMark } from '../components/CanopyMark';
 import { Icon } from '../components/Icon';
 import { ROUTES, SECTION_LABELS, routePath, type SidebarSection } from '../routes';
 import { useWorkspace } from '../workspace/WorkspaceProvider';
@@ -36,14 +37,14 @@ export function Sidebar({ prefix }: Props) {
       <div className="side-head row between">
         {!collapsed ? (
           <div className="row gap-8">
-            <div className="logo-mark">C</div>
+            <CanopyMark size={22} title="CanopyStudio" />
             <div className="stack">
               <div className="big" style={{ fontWeight: 600, fontSize: 13 }}>CanopyStudio</div>
               <div className="meta" style={{ fontSize: 10, lineHeight: 1.2 }}>by Redwood Digital</div>
             </div>
           </div>
         ) : (
-          <div className="logo-mark">C</div>
+          <CanopyMark size={22} title="CanopyStudio" />
         )}
         <button
           className="btn ghost sm"

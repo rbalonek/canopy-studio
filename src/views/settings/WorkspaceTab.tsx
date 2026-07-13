@@ -3,6 +3,7 @@ import { supabase } from '../../auth/supabaseClient';
 import type { Mode } from '../../routes';
 import { useAppState } from '../../shell/AppState';
 import { useWorkspace } from '../../workspace/WorkspaceProvider';
+import { BrandingPanel } from './BrandingPanel';
 import { ProfileDocEditor } from './ProfileDocEditor';
 import { inputStyle } from './shared';
 
@@ -117,6 +118,7 @@ export function WorkspaceTab() {
         </button>
       </div>
     </form>
+    <BrandingPanel />
     <ProfileDocEditor />
     </div>
   );

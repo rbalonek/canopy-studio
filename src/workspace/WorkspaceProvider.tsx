@@ -1,5 +1,6 @@
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, type ReactNode } from 'react';
 import type { Workspace } from '../data/types';
+import { setFavicon } from '../lib/setFavicon';
 import { useStaleRefresh } from './useStaleRefresh';
 
 /**
@@ -19,6 +20,14 @@ export function WorkspaceProvider({
   // Kick a background Meta refresh if this workspace's campaign data has
   // gone stale (once per session; reads stay DB-only either way).
   useStaleRefresh(workspace.id);
+
+  // Apply the workspace's own logo as the tab favicon while inside /app;
+  // restore the CanopyStudio default on unmount / logo change.
+  useEffect(() => {
+    setFavicon(workspace.logoUrl);
+    return () => setFavicon(null);
+  }, [workspace.logoUrl]);
+
   return <WorkspaceContext.Provider value={workspace}>{children}</WorkspaceContext.Provider>;
 }
 

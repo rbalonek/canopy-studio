@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { supabase } from '../auth/supabaseClient';
+import { CanopyMark } from '../components/CanopyMark';
 import { enqueueJob } from '../data/useJob';
 import type { WorkspaceMode } from '../data/types';
 
@@ -181,7 +182,7 @@ export function LiveOnboard() {
     <div className="content wide" style={{ maxWidth: 1100, padding: 24 }}>
       <div className="row between" style={{ marginBottom: 24 }}>
         <div className="row gap-8">
-          <div className="logo-mark">C</div>
+          <CanopyMark size={22} title="CanopyStudio" />
           <span style={{ fontWeight: 500 }}>CanopyStudio</span>
         </div>
         <button className="btn ghost meta" onClick={() => auth.signOut()}>
